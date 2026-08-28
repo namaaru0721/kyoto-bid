@@ -31,13 +31,13 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
-            # 業種「管」を選択
+            # 業種「管工事」を検索条件で選択
             select_loc = page.locator("select[name='syokusuCD']").or_(page.locator("select")).first
             select_loc.wait_for(state="attached", timeout=30000)
 
             options = select_loc.locator("option").all_inner_texts()
             for txt in options:
-                if "管" in txt:
+                if "管" in txt and "管理" not in txt:
                     select_loc.select_option(label=txt)
                     break
 
@@ -45,9 +45,9 @@ def run():
             btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
             btn.click()
             page.wait_for_load_state("networkidle", timeout=60000)
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(4000)
 
-            # メインページおよび全フレーム内をスキャン
+            # 表の「5列目（種別）」を判定し「管工事」のみ抽出
             targets = [page] + page.frames
             for target in targets:
                 try:
@@ -55,14 +55,15 @@ def run():
                     count = rows.count()
                     for i in range(count):
                         row = rows.nth(i)
-                        row_text = row.inner_text()
+                        tds = row.locator("td")
                         
-                        # 行内に「管」が含まれ、ヘッダー（No.）でない行を検出
-                        if "管" in row_text and "No." not in row_text:
-                            tds = row.locator("td")
-                            if tds.count() >= 3:
-                                title = tds.nth(2).inner_text().replace("\n", " ").strip()
-                                if len(title) > 3 and "戻る" not in title:
+                        if tds.count() >= 5:
+                            title = tds.nth(2).inner_text().replace("\n", " ").strip()   # 3列目: 案件名称
+                            category = tds.nth(4).inner_text().replace("\n", " ").strip()# 5列目: 種別
+
+                            # 種別が「管工事」である案件のみを厳密に取得
+                            if "管" in category and "管理" not in category:
+                                if len(title) > 3 and "No." not in title:
                                     current[title] = START_URL
                 except:
                     continue
@@ -80,7 +81,7 @@ def run():
             for title in current.keys():
                 msg += f"・{title}\n{START_URL}\n\n"
         else:
-            msg += "※現在、該当する公告案件はありません。"
+            msg += "※現在、該当する「管工事」案件はありません。"
         send_line(msg)
     else:
         new_items = [t for t in current.keys() if t not in saved]

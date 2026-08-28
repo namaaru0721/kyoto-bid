@@ -23,6 +23,9 @@ def run():
     is_first = len(saved) == 0
     current = {}
 
+    # ナビゲーション用の不要リンクを除外するためのキーワードリスト
+    ignore_words = ["戻る", "トップ", "検索", "ヘルプ", "メニュー", "ページ", "ログアウト", "条件", "次へ", "前へ"]
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -49,9 +52,16 @@ def run():
                 try:
                     title = a.inner_text().strip()
                     href = a.get_attribute("href")
-                    if href and title and len(title) > 2 and "javascript" not in href:
-                        url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
-                        current[url] = title
+                    
+                    if not href or not title or len(title) < 2:
+                        continue
+                    
+                    # 不要リンクのスキップ判定
+                    if any(w in title for w in ignore_words):
+                        continue
+
+                    url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
+                    current[url] = title
                 except:
                     continue
 
@@ -60,12 +70,14 @@ def run():
         finally:
             browser.close()
 
-    # 案件名とURLを一覧でLINEに送信
     if is_first:
         save_data(current)
         msg = f"【京都府入札】Efftis管工事の自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
-        for url, title in current.items():
-            msg += f"・{title}\n{url}\n\n"
+        if current:
+            for url, title in current.items():
+                msg += f"・{title}\n{url}\n\n"
+        else:
+            msg += "※現在、該当する公告案件はありません。"
         send_line(msg)
     else:
         new_items = [{"title": t, "url": u} for u, t in current.items() if u not in saved]

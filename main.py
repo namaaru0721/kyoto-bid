@@ -23,9 +23,6 @@ def run():
     is_first = len(saved) == 0
     current = {}
 
-    # ナビゲーション用の不要リンクを除外するためのキーワードリスト
-    ignore_words = ["戻る", "トップ", "検索", "ヘルプ", "メニュー", "ページ", "ログアウト", "条件", "次へ", "前へ"]
-
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -34,6 +31,7 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
+            # 業種「管」を選択
             select_loc = page.locator("select[name='syokusuCD']").or_(page.locator("select")).first
             select_loc.wait_for(state="attached", timeout=30000)
 
@@ -43,25 +41,27 @@ def run():
                     select_loc.select_option(label=txt)
                     break
 
+            # 検索実行
             btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
             btn.click()
             page.wait_for_load_state("networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
-            for a in page.locator("a").all():
+            # 表の各行から「案件名称(3列目)」と「詳細URL」を取得
+            rows = page.locator("table tr").all()
+            for row in rows:
                 try:
-                    title = a.inner_text().strip()
-                    href = a.get_attribute("href")
+                    tds = row.locator("td").all()
+                    a_tag = row.locator("a").first
                     
-                    if not href or not title or len(title) < 2:
-                        continue
-                    
-                    # 不要リンクのスキップ判定
-                    if any(w in title for w in ignore_words):
-                        continue
-
-                    url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
-                    current[url] = title
+                    if len(tds) >= 3 and a_tag.count() > 0:
+                        href = a_tag.get_attribute("href")
+                        # 案件名称（3列目）を取得
+                        title = tds[2].inner_text().replace("\n", " ").strip()
+                        
+                        if href and title and "javascript" not in href and len(title) > 3:
+                            url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
+                            current[url] = title
                 except:
                     continue
 

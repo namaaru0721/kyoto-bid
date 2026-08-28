@@ -23,7 +23,12 @@ def run():
     is_first = len(saved) == 0
     current = {}
 
-    target_keywords = ["管工事", "給水", "排水", "給排水", "空調", "衛生", "受水槽", "配管", "ダクト"]
+    # 空調・管工事関連を網羅するキーワード
+    target_keywords = [
+        "管工事", "給水", "排水", "給排水", "空調", 
+        "冷暖房", "換気", "衛生", "受水槽", "配管", 
+        "ダクト", "エアコン", "機械設備"
+    ]
     ignore_keywords = ["道路標示", "清掃", "草刈"]
 
     with sync_playwright() as p:
@@ -76,17 +81,17 @@ def run():
 
     if is_first:
         save_data(current)
-        msg = f"【京都府入札】Efftis管工事の自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
+        msg = f"【京都府入札】Efftis管工事・空調の自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
         if current:
             for title in current.keys():
                 msg += f"・{title}\n{START_URL}\n\n"
         else:
-            msg += "※現在、該当する「管工事」案件はありません。"
+            msg += "※現在、該当する公告案件はありません。"
         send_line(msg)
     else:
         new_items = [t for t in current.keys() if t not in saved]
         if new_items:
-            msg = f"【京都府入札】「管工事」の新着案件を検知 ({len(new_items)}件)\n\n"
+            msg = f"【京都府入札】「管工事・空調」の新着案件を検知 ({len(new_items)}件)\n\n"
             for title in new_items:
                 msg += f"・{title}\n{START_URL}\n\n"
             send_line(msg)

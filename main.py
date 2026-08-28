@@ -47,21 +47,18 @@ def run():
             page.wait_for_load_state("networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
-            # 表の各行から「案件名称(3列目)」と「詳細URL」を取得
+            # 表の各行から「案件名称(3列目)」と「種別(5列目)」を直接読み取る
             rows = page.locator("table tr").all()
             for row in rows:
                 try:
                     tds = row.locator("td").all()
-                    a_tag = row.locator("a").first
-                    
-                    if len(tds) >= 3 and a_tag.count() > 0:
-                        href = a_tag.get_attribute("href")
-                        # 案件名称（3列目）を取得
+                    if len(tds) >= 5:
                         title = tds[2].inner_text().replace("\n", " ").strip()
+                        category = tds[4].inner_text().strip()
                         
-                        if href and title and "javascript" not in href and len(title) > 3:
-                            url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
-                            current[url] = title
+                        # 種別が「管工事」またはタイトルに管工事関連が含まれる場合を検出
+                        if ("管" in category or "管" in title) and len(title) > 3:
+                            current[title] = START_URL
                 except:
                     continue
 
@@ -70,21 +67,22 @@ def run():
         finally:
             browser.close()
 
+    # LINE通知処理
     if is_first:
         save_data(current)
         msg = f"【京都府入札】Efftis管工事の自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
         if current:
-            for url, title in current.items():
-                msg += f"・{title}\n{url}\n\n"
+            for title in current.keys():
+                msg += f"・{title}\n{START_URL}\n\n"
         else:
             msg += "※現在、該当する公告案件はありません。"
         send_line(msg)
     else:
-        new_items = [{"title": t, "url": u} for u, t in current.items() if u not in saved]
+        new_items = [t for t in current.keys() if t not in saved]
         if new_items:
             msg = f"【京都府入札】「管工事」の新着案件を検知 ({len(new_items)}件)\n\n"
-            for item in new_items:
-                msg += f"・{item['title']}\n{item['url']}\n\n"
+            for title in new_items:
+                msg += f"・{title}\n{START_URL}\n\n"
             send_line(msg)
             saved.update(current)
             save_data(saved)

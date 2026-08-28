@@ -23,6 +23,9 @@ def run():
     is_first = len(saved) == 0
     current = {}
 
+    target_keywords = ["管工事", "給水", "排水", "給排水", "空調", "衛生", "受水槽", "配管", "ダクト"]
+    ignore_keywords = ["道路標示", "清掃", "草刈"]
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -31,39 +34,37 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
-            # 業種「管工事」を検索条件で選択
             select_loc = page.locator("select[name='syokusuCD']").or_(page.locator("select")).first
-            select_loc.wait_for(state="attached", timeout=30000)
+            if select_loc.count() > 0:
+                select_loc.wait_for(state="attached", timeout=10000)
+                options = select_loc.locator("option").all_inner_texts()
+                for txt in options:
+                    if "管" in txt and "管理" not in txt:
+                        select_loc.select_option(label=txt)
+                        break
 
-            options = select_loc.locator("option").all_inner_texts()
-            for txt in options:
-                if "管" in txt and "管理" not in txt:
-                    select_loc.select_option(label=txt)
-                    break
-
-            # 検索実行
             btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
-            btn.click()
-            page.wait_for_load_state("networkidle", timeout=60000)
-            page.wait_for_timeout(4000)
+            if btn.count() > 0:
+                btn.click()
+                page.wait_for_load_state("networkidle", timeout=60000)
+                page.wait_for_timeout(4000)
 
-            # 表の「5列目（種別）」を判定し「管工事」のみ抽出
             targets = [page] + page.frames
             for target in targets:
                 try:
                     rows = target.locator("tr")
-                    count = rows.count()
-                    for i in range(count):
+                    for i in range(rows.count()):
                         row = rows.nth(i)
-                        tds = row.locator("td")
+                        text = row.inner_text().replace("\n", " ")
                         
-                        if tds.count() >= 5:
-                            title = tds.nth(2).inner_text().replace("\n", " ").strip()   # 3列目: 案件名称
-                            category = tds.nth(4).inner_text().replace("\n", " ").strip()# 5列目: 種別
-
-                            # 種別が「管工事」である案件のみを厳密に取得
-                            if "管" in category and "管理" not in category:
-                                if len(title) > 3 and "No." not in title:
+                        if any(ig in text for ig in ignore_keywords):
+                            continue
+                        
+                        if any(kw in text for kw in target_keywords) and "No." not in text:
+                            tds = row.locator("td")
+                            if tds.count() >= 3:
+                                title = tds.nth(2).inner_text().replace("\n", " ").strip()
+                                if len(title) > 3:
                                     current[title] = START_URL
                 except:
                     continue
@@ -73,7 +74,6 @@ def run():
         finally:
             browser.close()
 
-    # LINE通知処理
     if is_first:
         save_data(current)
         msg = f"【京都府入札】Efftis管工事の自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"

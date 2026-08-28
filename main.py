@@ -27,52 +27,55 @@ def run():
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         
-        # 1. ページ読み込み
-        page.goto(START_URL, wait_until="domcontentloaded", timeout=60000)
+        try:
+            # 1. アクセス後、リダイレクト通信が落ち着くまで待機
+            page.goto(START_URL, wait_until="networkidle", timeout=60000)
+            page.wait_for_timeout(3000)
 
-        # 2. ドロップダウンから「管」が含まれる項目を自動選択
-        select_elem = page.query_selector("select[name='syokusuCD']") or page.query_selector("select")
-        if select_elem:
-            options = select_elem.query_selector_all("option")
-            target_val = None
-            for opt in options:
-                txt = opt.inner_text()
+            # 2. ドロップダウンが表示されるまで確実に待つ
+            select_loc = page.locator("select[name='syokusuCD']").or_(page.locator("select")).first
+            select_loc.wait_for(state="attached", timeout=30000)
+
+            # 3. 「管」が含まれる項目を選択
+            options = select_loc.locator("option").all_inner_texts()
+            for txt in options:
                 if "管" in txt:
-                    target_val = opt.get_attribute("value")
+                    select_loc.select_option(label=txt)
                     break
-            if target_val:
-                select_elem.select_option(value=target_val)
 
-        # 3. 検索ボタンクリック
-        submit_btn = page.query_selector("input[type='submit']") or page.query_selector("input[value*='検索']")
-        if submit_btn:
-            submit_btn.click()
-            page.wait_for_load_state("domcontentloaded", timeout=60000)
+            # 4. 検索ボタンを押す
+            btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
+            btn.click()
+            page.wait_for_load_state("networkidle", timeout=60000)
+            page.wait_for_timeout(3000)
 
-        # 4. 案件一覧の取得
-        for row in page.query_selector_all("tr"):
-            a = row.query_selector("a")
-            if a:
-                title = a.inner_text().strip()
-                href = a.get_attribute("href")
-                if href and title and len(title) > 2:
-                    url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
-                    current[url] = title
-        browser.close()
+            # 5. 案件リンクの抽出
+            for a in page.locator("a").all():
+                try:
+                    title = a.inner_text().strip()
+                    href = a.get_attribute("href")
+                    if href and title and len(title) > 2 and "javascript" not in href:
+                        url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
+                        current[url] = title
+                except:
+                    continue
 
-    # 5. 通知処理
+        except Exception as e:
+            print(f"ログ確認用: {e}")
+        finally:
+            browser.close()
+
     if is_first:
         save_data(current)
         send_line(f"【京都府入札】Efftis管工事の自動監視を開始しました。\n現在検出数: {len(current)}件")
-        return
-
-    new_items = [{"title": t, "url": u} for u, t in current.items() if u not in saved]
-    if new_items:
-        msg = f"【京都府入札】「管工事」の新着案件を検知 ({len(new_items)}件)\n\n"
-        for item in new_items: msg += f"・{item['title']}\n{item['url']}\n\n"
-        send_line(msg)
-        saved.update(current)
-        save_data(saved)
+    else:
+        new_items = [{"title": t, "url": u} for u, t in current.items() if u not in saved]
+        if new_items:
+            msg = f"【京都府入札】「管工事」の新着案件を検知 ({len(new_items)}件)\n\n"
+            for item in new_items: msg += f"・{item['title']}\n{item['url']}\n\n"
+            send_line(msg)
+            saved.update(current)
+            save_data(saved)
 
 if __name__ == "__main__":
     run()

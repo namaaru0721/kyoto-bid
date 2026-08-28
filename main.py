@@ -26,24 +26,44 @@ def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        page.goto(START_URL, wait_until="networkidle")
-        page.select_option("select[name='syokusuCD']", label="管工事")
-        page.click("input[type='submit'][value='検索']")
-        page.wait_for_load_state("networkidle")
+        
+        # 1. ページ読み込み
+        page.goto(START_URL, wait_until="domcontentloaded", timeout=60000)
 
-        for row in page.query_selector_all("table tr"):
+        # 2. ドロップダウンから「管」が含まれる項目を自動選択
+        select_elem = page.query_selector("select[name='syokusuCD']") or page.query_selector("select")
+        if select_elem:
+            options = select_elem.query_selector_all("option")
+            target_val = None
+            for opt in options:
+                txt = opt.inner_text()
+                if "管" in txt:
+                    target_val = opt.get_attribute("value")
+                    break
+            if target_val:
+                select_elem.select_option(value=target_val)
+
+        # 3. 検索ボタンクリック
+        submit_btn = page.query_selector("input[type='submit']") or page.query_selector("input[value*='検索']")
+        if submit_btn:
+            submit_btn.click()
+            page.wait_for_load_state("domcontentloaded", timeout=60000)
+
+        # 4. 案件一覧の取得
+        for row in page.query_selector_all("tr"):
             a = row.query_selector("a")
             if a:
                 title = a.inner_text().strip()
                 href = a.get_attribute("href")
-                if href and title:
+                if href and title and len(title) > 2:
                     url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
                     current[url] = title
         browser.close()
 
+    # 5. 通知処理
     if is_first:
         save_data(current)
-        send_line(f"【京都府入札】Efftis管工事の自動監視を開始しました。\n検出件数: {len(current)}件")
+        send_line(f"【京都府入札】Efftis管工事の自動監視を開始しました。\n現在検出数: {len(current)}件")
         return
 
     new_items = [{"title": t, "url": u} for u, t in current.items() if u not in saved]

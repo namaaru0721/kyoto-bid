@@ -45,20 +45,25 @@ def run():
             btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
             btn.click()
             page.wait_for_load_state("networkidle", timeout=60000)
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(5000)
 
-            # 表の各行から「案件名称(3列目)」と「種別(5列目)」を直接読み取る
-            rows = page.locator("table tr").all()
-            for row in rows:
+            # メインページおよび全フレーム内をスキャン
+            targets = [page] + page.frames
+            for target in targets:
                 try:
-                    tds = row.locator("td").all()
-                    if len(tds) >= 5:
-                        title = tds[2].inner_text().replace("\n", " ").strip()
-                        category = tds[4].inner_text().strip()
+                    rows = target.locator("tr")
+                    count = rows.count()
+                    for i in range(count):
+                        row = rows.nth(i)
+                        row_text = row.inner_text()
                         
-                        # 種別が「管工事」またはタイトルに管工事関連が含まれる場合を検出
-                        if ("管" in category or "管" in title) and len(title) > 3:
-                            current[title] = START_URL
+                        # 行内に「管」が含まれ、ヘッダー（No.）でない行を検出
+                        if "管" in row_text and "No." not in row_text:
+                            tds = row.locator("td")
+                            if tds.count() >= 3:
+                                title = tds.nth(2).inner_text().replace("\n", " ").strip()
+                                if len(title) > 3 and "戻る" not in title:
+                                    current[title] = START_URL
                 except:
                     continue
 

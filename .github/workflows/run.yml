@@ -1,0 +1,21 @@
+name: Kyoto Bidding Monitor
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with: { python-version: '3.10' }
+      - run: pip install playwright requests && playwright install chromium
+      - run: python main.py
+      - run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add known_links.json
+          git diff --quiet || (git commit -m "update" && git push)

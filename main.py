@@ -5,16 +5,21 @@ WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-5
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
-# 管工事関連キーワード
-KEYWORDS = ["管工事", "配管", "空調", "衛生", "給排水", "給水", "管改修", "管修繕", "機械設備", "ダクト", "ボイラー"]
-
-def is_pipe_work(title):
-    # 無関係な単語（管理、保管など）を除外して判定
-    for kw in KEYWORDS:
-        if kw in title:
+def is_pipe_work(text):
+    # 管工事・機械設備関連キーワード
+    keywords = ["管工事", "配管", "空調", "衛生", "給排水", "給水", "機械設備", "ダクト", "ボイラー", "管修繕", "管改修"]
+    for kw in keywords:
+        if kw in text:
             return True
-    if "管" in title and not any(ignore in title for ignore in ["管理", "保管", "管内", "管轄", "移管"]):
-        return True
+    
+    # 「管」の単漢字チェック（管理、保管などを除外）
+    if "管" in text:
+        clean_text = text
+        for ignore in ["管理", "保管", "管内", "管轄", "移管", "主管", "管財"]:
+            clean_text = clean_text.replace(ignore, "")
+        if "管" in clean_text:
+            return True
+            
     return False
 
 def load_data():
@@ -43,7 +48,7 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
-            # フォーム選択
+            # 種別選択（管工事）
             select_loc = page.locator("select[name='syokusuCD']").or_(page.locator("select")).first
             if select_loc.is_visible():
                 options = select_loc.locator("option").all_inner_texts()
@@ -59,15 +64,18 @@ def run():
                 page.wait_for_load_state("networkidle", timeout=60000)
                 page.wait_for_timeout(3000)
 
-            # 案件抽出 ＋ 二重キーワードフィルター
-            for a in page.locator("a").all():
+            # 表の「行全体」を対象に判定
+            for row in page.locator("tr").all():
                 try:
-                    title = a.inner_text().strip()
-                    href = a.get_attribute("href")
-                    if href and title and len(title) > 2 and "javascript" not in href:
-                        if is_pipe_work(title): # 管工事関連のみ抽出
-                            url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
-                            current[url] = title
+                    row_text = row.inner_text()
+                    if is_pipe_work(row_text):
+                        a = row.locator("a").first
+                        if a.count() > 0:
+                            title = a.inner_text().strip()
+                            href = a.get_attribute("href")
+                            if href and title and len(title) > 2 and "javascript" not in href:
+                                url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
+                                current[url] = title
                 except:
                     continue
 
@@ -78,7 +86,7 @@ def run():
 
     if is_first:
         save_data(current)
-        msg = f"【京都府入札】Efftis「管工事」限定監視を開始しました。\n現在検出数: {len(current)}件\n\n"
+        msg = f"【京都府入札】Efftis「管工事」自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
         for url, title in current.items():
             msg += f"・{title}\n{url}\n\n"
         send_line(msg)

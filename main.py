@@ -5,21 +5,19 @@ WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-5
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
-# 抽出したいキーワード（管工事・機械設備関連）
-INCLUDE_KEYWORDS = ["管工事", "配管", "空調", "衛生", "給排水", "機械設備", "機械", "設備", "ダクト", "ボイラー", "管修繕", "管改修"]
+# 除外ワード（無関係な工事を排除）
+EXCLUDE_KEYWORDS = ["信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路", "緑化", "剪定"]
 
-# 無関係な案件を弾く除外キーワード
-EXCLUDE_KEYWORDS = ["信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路"]
+# 対象ワード（管工事・機械設備に関連するもの）
+INCLUDE_KEYWORDS = ["管", "機械", "設備", "空調", "衛生", "給排水", "ダクト", "ボイラー", "ポンプ", "修繕", "改修"]
 
-def is_target_project(text):
-    # 除外ワードが含まれていれば即NG
+def is_target_project(title):
     for ex in EXCLUDE_KEYWORDS:
-        if ex in text:
+        if ex in title:
             return False
             
-    # 対象ワードが含まれていればOK
     for inc in INCLUDE_KEYWORDS:
-        if inc in text:
+        if inc in title:
             return True
             
     return False
@@ -50,27 +48,21 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
-            # 条件指定せずそのまま「検索」ボタンを押す（全件取得）
+            # スキップ判定を外して検索ボタンを直接クリック
             btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
-            if btn.is_visible():
-                btn.click()
-                page.wait_for_load_state("networkidle", timeout=60000)
-                page.wait_for_timeout(3000)
+            btn.click()
+            page.wait_for_load_state("networkidle", timeout=60000)
+            page.wait_for_timeout(3000)
 
-            # 行単位・リンク単位で高精度フィルター
-            for row in page.locator("tr").all():
+            # 案件リンクの抽出と選別
+            for a in page.locator("a").all():
                 try:
-                    row_text = row.inner_text()
-                    a = row.locator("a").first
-                    if a.count() > 0:
-                        title = a.inner_text().strip()
-                        href = a.get_attribute("href")
-                        
-                        full_text = f"{title} {row_text}"
-                        if href and title and len(title) > 2 and "javascript" not in href:
-                            if is_target_project(full_text):
-                                url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
-                                current[url] = title
+                    title = a.inner_text().strip()
+                    href = a.get_attribute("href")
+                    if href and title and len(title) > 2 and "javascript" not in href:
+                        if is_target_project(title):
+                            url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
+                            current[url] = title
                 except:
                     continue
 

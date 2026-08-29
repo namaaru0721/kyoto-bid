@@ -5,19 +5,21 @@ WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-5
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
-def is_pipe_work(text):
-    # 管工事・機械設備関連キーワード
-    keywords = ["管工事", "配管", "空調", "衛生", "給排水", "給水", "機械設備", "ダクト", "ボイラー", "管修繕", "管改修"]
-    for kw in keywords:
-        if kw in text:
-            return True
-    
-    # 「管」の単漢字チェック（管理、保管などを除外）
-    if "管" in text:
-        clean_text = text
-        for ignore in ["管理", "保管", "管内", "管轄", "移管", "主管", "管財"]:
-            clean_text = clean_text.replace(ignore, "")
-        if "管" in clean_text:
+# 抽出したいキーワード（管工事・機械設備関連）
+INCLUDE_KEYWORDS = ["管工事", "配管", "空調", "衛生", "給排水", "機械設備", "機械", "設備", "ダクト", "ボイラー", "管修繕", "管改修"]
+
+# 無関係な案件を弾く除外キーワード
+EXCLUDE_KEYWORDS = ["信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路"]
+
+def is_target_project(text):
+    # 除外ワードが含まれていれば即NG
+    for ex in EXCLUDE_KEYWORDS:
+        if ex in text:
+            return False
+            
+    # 対象ワードが含まれていればOK
+    for inc in INCLUDE_KEYWORDS:
+        if inc in text:
             return True
             
     return False
@@ -48,32 +50,25 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
-            # 種別選択（管工事）
-            select_loc = page.locator("select[name='syokusuCD']").or_(page.locator("select")).first
-            if select_loc.is_visible():
-                options = select_loc.locator("option").all_inner_texts()
-                for txt in options:
-                    if "管" in txt:
-                        select_loc.select_option(label=txt)
-                        break
-
-            # 検索ボタン押下
+            # 条件指定せずそのまま「検索」ボタンを押す（全件取得）
             btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
             if btn.is_visible():
                 btn.click()
                 page.wait_for_load_state("networkidle", timeout=60000)
                 page.wait_for_timeout(3000)
 
-            # 表の「行全体」を対象に判定
+            # 行単位・リンク単位で高精度フィルター
             for row in page.locator("tr").all():
                 try:
                     row_text = row.inner_text()
-                    if is_pipe_work(row_text):
-                        a = row.locator("a").first
-                        if a.count() > 0:
-                            title = a.inner_text().strip()
-                            href = a.get_attribute("href")
-                            if href and title and len(title) > 2 and "javascript" not in href:
+                    a = row.locator("a").first
+                    if a.count() > 0:
+                        title = a.inner_text().strip()
+                        href = a.get_attribute("href")
+                        
+                        full_text = f"{title} {row_text}"
+                        if href and title and len(title) > 2 and "javascript" not in href:
+                            if is_target_project(full_text):
                                 url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
                                 current[url] = title
                 except:
@@ -86,14 +81,14 @@ def run():
 
     if is_first:
         save_data(current)
-        msg = f"【京都府入札】Efftis「管工事」自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
+        msg = f"【京都府入札】Efftis「管工事・機械設備」自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
         for url, title in current.items():
             msg += f"・{title}\n{url}\n\n"
         send_line(msg)
     else:
         new_items = [{"title": t, "url": u} for u, t in current.items() if u not in saved]
         if new_items:
-            msg = f"【京都府入札】「管工事」の新着案件を検知 ({len(new_items)}件)\n\n"
+            msg = f"【京都府入札】「管工事・機械設備」の新着案件を検知 ({len(new_items)}件)\n\n"
             for item in new_items:
                 msg += f"・{item['title']}\n{item['url']}\n\n"
             send_line(msg)

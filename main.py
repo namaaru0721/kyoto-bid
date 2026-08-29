@@ -2,7 +2,7 @@ import json, os, requests
 from playwright.sync_api import sync_playwright
 
 WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-521fa876bcb5"
-START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi01/PiCtBaFi01start.vm"
+START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
 def load_data():
@@ -36,37 +36,21 @@ def run():
         
         try:
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(2000)
 
-            # 「工事(○件)」リンクが存在するフレームを特定して件数を取得
-            target_frame = page
-            for frame in page.frames:
-                if frame.locator("a:has-text('工事(')").count() > 0:
-                    target_frame = frame
-                    break
-            
-            link_count = target_frame.locator("a:has-text('工事(')").count()
+            # 条件指定せず検索実行（入札課・全振興局・土木事務所の公告が一括表示される）
+            btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
+            if btn.count() > 0:
+                btn.click()
+                page.wait_for_load_state("networkidle", timeout=60000)
+                page.wait_for_timeout(3000)
 
-            # 各部局の「工事(○件)」リンクを順にクリックして巡回
-            for idx in range(link_count):
-                try:
-                    page.goto(START_URL, wait_until="networkidle", timeout=30000)
-                    page.wait_for_timeout(2000)
-
-                    tf = page
-                    for frame in page.frames:
-                        if frame.locator("a:has-text('工事(')").count() > 0:
-                            tf = frame
-                            break
-                    
-                    link = tf.locator("a:has-text('工事(')").nth(idx)
-                    link.click()
-                    page.wait_for_load_state("networkidle", timeout=30000)
-                    page.wait_for_timeout(2000)
-
-                    # 表示された表から該当案件をスキャン
-                    for sub in [page] + page.frames:
-                        rows = sub.locator("tr")
+            # 検索結果の全ページ（1ページ目〜最終ページ）を連続スキャン
+            while True:
+                targets = [page] + page.frames
+                for target in targets:
+                    try:
+                        rows = target.locator("tr")
                         for i in range(rows.count()):
                             row = rows.nth(i)
                             text = row.inner_text().replace("\n", " ")
@@ -80,8 +64,22 @@ def run():
                                     title = tds.nth(2).inner_text().replace("\n", " ").strip()
                                     if len(title) > 3:
                                         current[title] = START_URL
-                except Exception as e_item:
-                    continue
+                    except:
+                        continue
+
+                # 次ページボタンがあればクリックして進む
+                has_next = False
+                for target in targets:
+                    next_btn = target.locator("a:has-text('次へ'), input[value*='次'], a:has-text('次ページ')")
+                    if next_btn.count() > 0 and next_btn.first.is_visible():
+                        next_btn.first.click()
+                        page.wait_for_load_state("networkidle", timeout=30000)
+                        page.wait_for_timeout(2000)
+                        has_next = True
+                        break
+                
+                if not has_next:
+                    break
 
         except Exception as e:
             print(f"エラー発生: {e}")

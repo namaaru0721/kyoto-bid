@@ -2,7 +2,6 @@ import json, os, requests
 from playwright.sync_api import sync_playwright
 
 WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-521fa876bcb5"
-# 「入札公告・入札情報」のトップページへ変更
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi01/PiCtBaFi01start.vm"
 CACHE_FILE = "known_links.json"
 
@@ -39,29 +38,35 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
-            # 全部局（入札課・各土木事務所等）の「工事(○件)」リンクを取得
-            kouji_links = []
-            targets = [page] + page.frames
-            for target in targets:
-                for a in target.locator("a").all():
-                    try:
-                        txt = a.inner_text().strip()
-                        href = a.get_attribute("href")
-                        if "工事(" in txt and href:
-                            url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
-                            kouji_links.append(url)
-                    except:
-                        continue
+            # 「工事(○件)」リンクが存在するフレームを特定して件数を取得
+            target_frame = page
+            for frame in page.frames:
+                if frame.locator("a:has-text('工事(')").count() > 0:
+                    target_frame = frame
+                    break
+            
+            link_count = target_frame.locator("a:has-text('工事(')").count()
 
-            # 各部局の工事一覧ページを順番に巡回して案件をスキャン
-            for k_url in kouji_links:
+            # 各部局の「工事(○件)」リンクを順にクリックして巡回
+            for idx in range(link_count):
                 try:
-                    page.goto(k_url, wait_until="networkidle", timeout=30000)
-                    page.wait_for_timeout(1500)
+                    page.goto(START_URL, wait_until="networkidle", timeout=30000)
+                    page.wait_for_timeout(2000)
 
-                    sub_targets = [page] + page.frames
-                    for target in sub_targets:
-                        rows = target.locator("tr")
+                    tf = page
+                    for frame in page.frames:
+                        if frame.locator("a:has-text('工事(')").count() > 0:
+                            tf = frame
+                            break
+                    
+                    link = tf.locator("a:has-text('工事(')").nth(idx)
+                    link.click()
+                    page.wait_for_load_state("networkidle", timeout=30000)
+                    page.wait_for_timeout(2000)
+
+                    # 表示された表から該当案件をスキャン
+                    for sub in [page] + page.frames:
+                        rows = sub.locator("tr")
                         for i in range(rows.count()):
                             row = rows.nth(i)
                             text = row.inner_text().replace("\n", " ")
@@ -75,7 +80,7 @@ def run():
                                     title = tds.nth(2).inner_text().replace("\n", " ").strip()
                                     if len(title) > 3:
                                         current[title] = START_URL
-                except Exception as e:
+                except Exception as e_item:
                     continue
 
         except Exception as e:

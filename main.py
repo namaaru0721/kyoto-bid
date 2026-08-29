@@ -23,7 +23,6 @@ def run():
     is_first = len(saved) == 0
     current = {}
 
-    # 空調・管工事関連を網羅するキーワード
     target_keywords = [
         "管工事", "給水", "排水", "給排水", "空調", 
         "冷暖房", "換気", "衛生", "受水槽", "配管", 
@@ -39,40 +38,50 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
-            select_loc = page.locator("select[name='syokusuCD']").or_(page.locator("select")).first
-            if select_loc.count() > 0:
-                select_loc.wait_for(state="attached", timeout=10000)
-                options = select_loc.locator("option").all_inner_texts()
-                for txt in options:
-                    if "管" in txt and "管理" not in txt:
-                        select_loc.select_option(label=txt)
-                        break
-
+            # 業種条件なし、または管工事条件で検索実行
             btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
             if btn.count() > 0:
                 btn.click()
                 page.wait_for_load_state("networkidle", timeout=60000)
                 page.wait_for_timeout(4000)
 
-            targets = [page] + page.frames
-            for target in targets:
-                try:
-                    rows = target.locator("tr")
-                    for i in range(rows.count()):
-                        row = rows.nth(i)
-                        text = row.inner_text().replace("\n", " ")
-                        
-                        if any(ig in text for ig in ignore_keywords):
-                            continue
-                        
-                        if any(kw in text for kw in target_keywords) and "No." not in text:
-                            tds = row.locator("td")
-                            if tds.count() >= 3:
-                                title = tds.nth(2).inner_text().replace("\n", " ").strip()
-                                if len(title) > 3:
-                                    current[title] = START_URL
-                except:
-                    continue
+            # 全ページをめくりながらスキャン
+            page_count = 0
+            while page_count < 10:  # 最大10ページまで巡回
+                targets = [page] + page.frames
+                for target in targets:
+                    try:
+                        rows = target.locator("tr")
+                        for i in range(rows.count()):
+                            row = rows.nth(i)
+                            text = row.inner_text().replace("\n", " ")
+                            
+                            if any(ig in text for ig in ignore_keywords):
+                                continue
+                            
+                            if any(kw in text for kw in target_keywords) and "No." not in text:
+                                tds = row.locator("td")
+                                if tds.count() >= 3:
+                                    title = tds.nth(2).inner_text().replace("\n", " ").strip()
+                                    if len(title) > 3:
+                                        current[title] = START_URL
+                    except:
+                        continue
+
+                # 「次へ」または「次ページ」ボタンを探す
+                next_found = False
+                for target in targets:
+                    next_btn = target.locator("a:has-text('次へ'), input[value*='次'], a:has-text('次ページ')")
+                    if next_btn.count() > 0 and next_btn.first.is_visible():
+                        next_btn.first.click()
+                        page.wait_for_load_state("networkidle", timeout=30000)
+                        page.wait_for_timeout(3000)
+                        next_found = True
+                        break
+                
+                if not next_found:
+                    break
+                page_count += 1
 
         except Exception as e:
             print(f"エラー発生: {e}")
@@ -81,7 +90,7 @@ def run():
 
     if is_first:
         save_data(current)
-        msg = f"【京都府入札】Efftis管工事・空調の自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
+        msg = f"【京都府入札】Efftis管工事・受水槽の全ページ監視を開始しました。\n現在検出数: {len(current)}件\n\n"
         if current:
             for title in current.keys():
                 msg += f"・{title}\n{START_URL}\n\n"
@@ -91,7 +100,7 @@ def run():
     else:
         new_items = [t for t in current.keys() if t not in saved]
         if new_items:
-            msg = f"【京都府入札】「管工事・空調」の新着案件を検知 ({len(new_items)}件)\n\n"
+            msg = f"【京都府入札】新着案件を検知 ({len(new_items)}件)\n\n"
             for title in new_items:
                 msg += f"・{title}\n{START_URL}\n\n"
             send_line(msg)

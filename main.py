@@ -38,14 +38,23 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(2000)
 
-            # 条件指定せず検索実行（入札課・全振興局・土木事務所の公告が一括表示される）
+            # 業種「管」を選択して全体を検索
+            select_loc = page.locator("select[name='syokusuCD']").or_(page.locator("select")).first
+            if select_loc.count() > 0:
+                select_loc.wait_for(state="attached", timeout=10000)
+                options = select_loc.locator("option").all_inner_texts()
+                for txt in options:
+                    if "管" in txt and "管理" not in txt:
+                        select_loc.select_option(label=txt)
+                        break
+
             btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
             if btn.count() > 0:
                 btn.click()
                 page.wait_for_load_state("networkidle", timeout=60000)
                 page.wait_for_timeout(3000)
 
-            # 検索結果の全ページ（1ページ目〜最終ページ）を連続スキャン
+            # 検索結果の全ページを走査（部局名＋案件名をセットで抽出）
             while True:
                 targets = [page] + page.frames
                 for target in targets:
@@ -61,13 +70,15 @@ def run():
                             if any(kw in text for kw in target_keywords) and "No." not in text:
                                 tds = row.locator("td")
                                 if tds.count() >= 3:
+                                    dept = tds.nth(1).inner_text().replace("\n", " ").strip() if tds.count() >= 2 else ""
                                     title = tds.nth(2).inner_text().replace("\n", " ").strip()
-                                    if len(title) > 3:
-                                        current[title] = START_URL
+                                    
+                                    if len(title) > 3 and "戻る" not in title:
+                                        full_title = f"【{dept}】{title}" if dept else title
+                                        current[full_title] = START_URL
                     except:
                         continue
 
-                # 次ページボタンがあればクリックして進む
                 has_next = False
                 for target in targets:
                     next_btn = target.locator("a:has-text('次へ'), input[value*='次'], a:has-text('次ページ')")
@@ -77,7 +88,6 @@ def run():
                         page.wait_for_timeout(2000)
                         has_next = True
                         break
-                
                 if not has_next:
                     break
 
@@ -88,12 +98,12 @@ def run():
 
     if is_first:
         save_data(current)
-        msg = f"【京都府入札】Efftis全庁の管工事・受水槽監視を開始しました。\n現在検出数: {len(current)}件\n\n"
+        msg = f"【京都府入札】全庁（入札課・教育庁・警察本部含む）の自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
         if current:
             for title in current.keys():
                 msg += f"・{title}\n{START_URL}\n\n"
         else:
-            msg += "※現在、該当する公告案件はありません。"
+            msg += "※現在、該当する「管工事」案件はありません。"
         send_line(msg)
     else:
         new_items = [t for t in current.keys() if t not in saved]

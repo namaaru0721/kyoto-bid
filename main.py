@@ -2,7 +2,8 @@ import json, os, requests
 from playwright.sync_api import sync_playwright
 
 WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-521fa876bcb5"
-START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
+# 「入札公告・入札情報」のトップページへ変更
+START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi01/PiCtBaFi01start.vm"
 CACHE_FILE = "known_links.json"
 
 def load_data():
@@ -38,19 +39,28 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
-            # 業種条件なし、または管工事条件で検索実行
-            btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
-            if btn.count() > 0:
-                btn.click()
-                page.wait_for_load_state("networkidle", timeout=60000)
-                page.wait_for_timeout(4000)
-
-            # 全ページをめくりながらスキャン
-            page_count = 0
-            while page_count < 10:  # 最大10ページまで巡回
-                targets = [page] + page.frames
-                for target in targets:
+            # 全部局（入札課・各土木事務所等）の「工事(○件)」リンクを取得
+            kouji_links = []
+            targets = [page] + page.frames
+            for target in targets:
+                for a in target.locator("a").all():
                     try:
+                        txt = a.inner_text().strip()
+                        href = a.get_attribute("href")
+                        if "工事(" in txt and href:
+                            url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
+                            kouji_links.append(url)
+                    except:
+                        continue
+
+            # 各部局の工事一覧ページを順番に巡回して案件をスキャン
+            for k_url in kouji_links:
+                try:
+                    page.goto(k_url, wait_until="networkidle", timeout=30000)
+                    page.wait_for_timeout(1500)
+
+                    sub_targets = [page] + page.frames
+                    for target in sub_targets:
                         rows = target.locator("tr")
                         for i in range(rows.count()):
                             row = rows.nth(i)
@@ -65,23 +75,8 @@ def run():
                                     title = tds.nth(2).inner_text().replace("\n", " ").strip()
                                     if len(title) > 3:
                                         current[title] = START_URL
-                    except:
-                        continue
-
-                # 「次へ」または「次ページ」ボタンを探す
-                next_found = False
-                for target in targets:
-                    next_btn = target.locator("a:has-text('次へ'), input[value*='次'], a:has-text('次ページ')")
-                    if next_btn.count() > 0 and next_btn.first.is_visible():
-                        next_btn.first.click()
-                        page.wait_for_load_state("networkidle", timeout=30000)
-                        page.wait_for_timeout(3000)
-                        next_found = True
-                        break
-                
-                if not next_found:
-                    break
-                page_count += 1
+                except Exception as e:
+                    continue
 
         except Exception as e:
             print(f"エラー発生: {e}")
@@ -90,7 +85,7 @@ def run():
 
     if is_first:
         save_data(current)
-        msg = f"【京都府入札】Efftis管工事・受水槽の全ページ監視を開始しました。\n現在検出数: {len(current)}件\n\n"
+        msg = f"【京都府入札】Efftis全庁の管工事・受水槽監視を開始しました。\n現在検出数: {len(current)}件\n\n"
         if current:
             for title in current.keys():
                 msg += f"・{title}\n{START_URL}\n\n"

@@ -5,11 +5,11 @@ WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-5
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
-# 除外ワード（無関係な工事を排除）
-EXCLUDE_KEYWORDS = ["信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路", "緑化", "剪定"]
+# 対象キーワード（管工事・機械設備関連）
+INCLUDE_KEYWORDS = ["管", "機械", "設備", "空調", "衛生", "給排水", "水洗", "ダクト", "ボイラー", "ポンプ", "修繕", "改修", "浄化センター"]
 
-# 対象ワード（管工事・機械設備に関連するもの）
-INCLUDE_KEYWORDS = ["管", "機械", "設備", "空調", "衛生", "給排水", "ダクト", "ボイラー", "ポンプ", "修繕", "改修"]
+# 除外キーワード（無関係な工事を排除）
+EXCLUDE_KEYWORDS = ["信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路", "緑化", "剪定", "橋梁", "落石"]
 
 def is_target_project(title):
     for ex in EXCLUDE_KEYWORDS:
@@ -48,23 +48,35 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(3000)
 
-            # スキップ判定を外して検索ボタンを直接クリック
-            btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
-            btn.click()
-            page.wait_for_load_state("networkidle", timeout=60000)
-            page.wait_for_timeout(3000)
+            # 全フレームから検索ボタンを探して押す
+            btn_clicked = False
+            for frame in page.frames:
+                btn = frame.locator("input[type='submit']").or_(frame.locator("input[value*='検索']")).first
+                if btn.count() > 0:
+                    btn.click()
+                    btn_clicked = True
+                    break
+            
+            if not btn_clicked:
+                btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
+                if btn.count() > 0:
+                    btn.click()
 
-            # 案件リンクの抽出と選別
-            for a in page.locator("a").all():
-                try:
-                    title = a.inner_text().strip()
-                    href = a.get_attribute("href")
-                    if href and title and len(title) > 2 and "javascript" not in href:
-                        if is_target_project(title):
-                            url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
-                            current[url] = title
-                except:
-                    continue
+            page.wait_for_timeout(5000)
+
+            # メインページおよび全フレーム内のリンクを取得
+            frames_to_check = page.frames if page.frames else [page]
+            for frame in frames_to_check:
+                for a in frame.locator("a").all():
+                    try:
+                        title = a.inner_text().strip()
+                        href = a.get_attribute("href")
+                        if href and title and len(title) > 2 and "javascript" not in href:
+                            if is_target_project(title):
+                                url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
+                                current[url] = title
+                    except:
+                        continue
 
         except Exception as e:
             print(f"エラー発生: {e}")

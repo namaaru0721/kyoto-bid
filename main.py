@@ -23,13 +23,6 @@ def run():
     is_first = len(saved) == 0
     current = {}
 
-    target_keywords = [
-        "管工事", "給水", "排水", "給排水", "空調", 
-        "冷暖房", "換気", "衛生", "受水槽", "配管", 
-        "ダクト", "エアコン", "機械設備"
-    ]
-    ignore_keywords = ["道路標示", "清掃", "草刈"]
-
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -38,50 +31,64 @@ def run():
             page.goto(START_URL, wait_until="networkidle", timeout=60000)
             page.wait_for_timeout(2000)
 
-            # 業種「管」を選択して全体を検索
-            select_loc = page.locator("select[name='syokusuCD']").or_(page.locator("select")).first
-            if select_loc.count() > 0:
-                select_loc.wait_for(state="attached", timeout=10000)
-                options = select_loc.locator("option").all_inner_texts()
-                for txt in options:
-                    if "管" in txt and "管理" not in txt:
-                        select_loc.select_option(label=txt)
-                        break
+            target_frame = page
+            for frame in page.frames:
+                if frame.locator("select").count() > 0:
+                    target_frame = frame
+                    break
 
-            btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
+            # 発注機関の限定を解除し、業種「管」を選択
+            selects = target_frame.locator("select").all()
+            for sel in selects:
+                name = sel.get_attribute("name") or ""
+                # 業種以外の選択肢（発注機関など）は先頭の「指定なし(全庁)」に戻す
+                if "syoku" not in name.lower() and "gyo" not in name.lower():
+                    try:
+                        sel.select_option(index=0)
+                    except:
+                        pass
+                else:
+                    options = sel.locator("option").all()
+                    for opt in options:
+                        txt = opt.inner_text().strip()
+                        if "管" in txt and "管理" not in txt:
+                            val = opt.get_attribute("value")
+                            if val:
+                                sel.select_option(value=val)
+                            else:
+                                sel.select_option(label=txt)
+                            break
+
+            # 検索ボタンをクリック
+            btn = target_frame.locator("input[type='submit']").or_(target_frame.locator("input[value*='検索']")).first
             if btn.count() > 0:
                 btn.click()
                 page.wait_for_load_state("networkidle", timeout=60000)
                 page.wait_for_timeout(3000)
 
-            # 検索結果の全ページを走査（部局名＋案件名をセットで抽出）
+            # 結果の全ページ走査
             while True:
-                targets = [page] + page.frames
-                for target in targets:
+                frames = [page] + page.frames
+                for frame in frames:
                     try:
-                        rows = target.locator("tr")
+                        rows = frame.locator("tr")
                         for i in range(rows.count()):
                             row = rows.nth(i)
-                            text = row.inner_text().replace("\n", " ")
-                            
-                            if any(ig in text for ig in ignore_keywords):
-                                continue
-                            
-                            if any(kw in text for kw in target_keywords) and "No." not in text:
-                                tds = row.locator("td")
-                                if tds.count() >= 3:
+                            tds = row.locator("td")
+                            if tds.count() >= 3:
+                                text = row.inner_text().replace("\n", " ")
+                                if "No." not in text and "戻る" not in text:
                                     dept = tds.nth(1).inner_text().replace("\n", " ").strip() if tds.count() >= 2 else ""
                                     title = tds.nth(2).inner_text().replace("\n", " ").strip()
-                                    
-                                    if len(title) > 3 and "戻る" not in title:
-                                        full_title = f"【{dept}】{title}" if dept else title
-                                        current[full_title] = START_URL
+                                    if len(title) > 3:
+                                        full_name = f"【{dept}】{title}" if dept else title
+                                        current[full_name] = START_URL
                     except:
                         continue
 
                 has_next = False
-                for target in targets:
-                    next_btn = target.locator("a:has-text('次へ'), input[value*='次'], a:has-text('次ページ')")
+                for frame in frames:
+                    next_btn = frame.locator("a:has-text('次へ'), input[value*='次'], a:has-text('次ページ')")
                     if next_btn.count() > 0 and next_btn.first.is_visible():
                         next_btn.first.click()
                         page.wait_for_load_state("networkidle", timeout=30000)
@@ -98,7 +105,7 @@ def run():
 
     if is_first:
         save_data(current)
-        msg = f"【京都府入札】全庁（入札課・教育庁・警察本部含む）の自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
+        msg = f"【京都府入札】全庁（入札課・教育庁・警察本部・全土木）の自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
         if current:
             for title in current.keys():
                 msg += f"・{title}\n{START_URL}\n\n"

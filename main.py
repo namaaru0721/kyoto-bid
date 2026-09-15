@@ -1,4 +1,4 @@
-import json, os, requests
+import json, os, requests, re
 from playwright.sync_api import sync_playwright
 
 WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-521fa876bcb5"
@@ -33,7 +33,7 @@ def save_data(data):
     with open(CACHE_FILE, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False)
 
 def send_line(text):
-    requests.post(WEBHOOK_URL, json={"title": "京都府入札(Efftis)", "body": {"text": text}})
+    requests.post(WEBHOOK_URL, json={"title": "京都府・市入札(Efftis)", "body": {"text": text}})
 
 def run():
     saved = load_data()
@@ -45,8 +45,9 @@ def run():
         page = browser.new_page()
         
         try:
-            page.goto(START_URL, wait_until="networkidle", timeout=60000)
-            page.wait_for_timeout(3000)
+            # ページ読み込み（タイムアウト防止）
+            page.goto(START_URL, wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(4000)
 
             # 全フレームから検索ボタンを探して押す
             btn_clicked = False
@@ -64,17 +65,17 @@ def run():
 
             page.wait_for_timeout(5000)
 
-            # メインページおよび全フレーム内のリンクを取得
+            # メインページおよび全フレーム内のリンク・テキストを取得
             frames_to_check = page.frames if page.frames else [page]
             for frame in frames_to_check:
                 for a in frame.locator("a").all():
                     try:
-                        title = a.inner_text().strip()
-                        href = a.get_attribute("href")
-                        if href and title and len(title) > 2 and "javascript" not in href:
+                        title = re.sub(r'\s+', ' ', a.inner_text()).strip()
+                        
+                        # 3文字以上かつ対象キーワードにマッチするか確認
+                        if title and len(title) > 3:
                             if is_target_project(title):
-                                url = f"https://kyoto.efftis.jp{href}" if href.startswith("/") else href
-                                current[url] = title
+                                current[title] = title
                     except:
                         continue
 
@@ -83,21 +84,30 @@ def run():
         finally:
             browser.close()
 
+    print(f"【判定結果】該当案件数: {len(current)}件")
+
     if is_first:
         save_data(current)
-        msg = f"【京都府入札】Efftis「管工事・機械設備」自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
-        for url, title in current.items():
-            msg += f"・{title}\n{url}\n\n"
-        send_line(msg)
+        if current:
+            msg = f"【京都入札】Efftis「管工事・機械設備」自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
+            for title in current.keys():
+                msg += f"・{title}\n\n"
+            send_line(msg)
+            print("初回通知を送信しました。")
+        else:
+            print("初回実行: 該当案件は0件でした。")
     else:
-        new_items = [{"title": t, "url": u} for u, t in current.items() if u not in saved]
+        new_items = [t for t in current.keys() if t not in saved]
         if new_items:
-            msg = f"【京都府入札】「管工事・機械設備」の新着案件を検知 ({len(new_items)}件)\n\n"
-            for item in new_items:
-                msg += f"・{item['title']}\n{item['url']}\n\n"
+            msg = f"【京都入札】「管工事・機械設備」の新着案件を検知 ({len(new_items)}件)\n\n"
+            for title in new_items:
+                msg += f"・{title}\n\n"
             send_line(msg)
             saved.update(current)
             save_data(saved)
+            print(f"新着{len(new_items)}件の通知を送信しました。")
+        else:
+            print("新着案件はありませんでした。")
 
 if __name__ == "__main__":
     run()

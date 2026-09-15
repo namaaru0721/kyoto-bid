@@ -5,7 +5,8 @@ WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-5
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
-FORCE_OVERWRITE = True
+# テスト時や強制再通知したい場合は True に変更
+FORCE_OVERWRITE = False
 
 INCLUDE_KEYWORDS = ["管工事", "機械", "設備", "空調", "衛生", "給排水", "水洗", "ダクト", "ボイラー", "ポンプ", "修繕", "改修", "浄化センター"]
 EXCLUDE_KEYWORDS = ["管内一円", "インフラ保全", "信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路", "緑化", "剪定", "橋梁", "落石"]
@@ -30,7 +31,10 @@ def save_data(data):
     with open(CACHE_FILE, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
 
 def send_line(text):
-    requests.post(WEBHOOK_URL, json={"title": "京都府・市入札(Efftis)", "body": {"text": text}})
+    try:
+        requests.post(WEBHOOK_URL, json={"title": "京都府入札(Efftis)", "body": {"text": text}})
+    except Exception as e:
+        print(f"LINE送信エラー: {e}")
 
 def run():
     saved = load_data()
@@ -43,32 +47,30 @@ def run():
         
         try:
             page.goto(START_URL, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(4000)
+            page.wait_for_timeout(3000)
 
+            # 全フレームからEfftis特有の検索ボタンを探してクリック
             btn_clicked = False
             for frame in page.frames:
-                search_btn = frame.locator("input[type='submit'], input[type='image'], input[value*='検索'], img[alt*='検索'], a:has-text('検索')").first
-                if search_btn.count() > 0:
-                    search_btn.click()
+                btn = frame.locator("input[value*='検'], input[value*='検索'], input[type='submit'], img[alt*='検索']").first
+                if btn.count() > 0:
+                    btn.click()
                     btn_clicked = True
+                    print("検索ボタンをクリックしました。")
                     break
-            
-            if not btn_clicked:
-                search_btn = page.locator("input[type='submit'], input[type='image'], input[value*='検索'], img[alt*='検索'], a:has-text('検索')").first
-                if search_btn.count() > 0:
-                    search_btn.click()
 
+            # 一覧テーブルの読み込み待ち
             page.wait_for_timeout(6000)
 
+            # 一覧表の全行（tr）を取得して「管工事・設備案件」を抽出
             frames_to_check = page.frames if page.frames else [page]
             for frame in frames_to_check:
-                elements = frame.locator("a, td").all()
-                for el in elements:
+                rows = frame.locator("tr").all()
+                for row in rows:
                     try:
-                        text = re.sub(r'\s+', ' ', el.inner_text()).strip()
-                        if text and len(text) > 3:
-                            if is_target_project(text):
-                                current[text] = text
+                        text = re.sub(r'\s+', ' ', row.inner_text()).strip()
+                        if len(text) > 10 and is_target_project(text):
+                            current[text] = text
                     except:
                         continue
 
@@ -82,9 +84,11 @@ def run():
     if is_first:
         save_data(current)
         if current:
-            msg = f"【京都入札】Efftis「管工事・機械設備」自動監視を更新しました。\n現在検出数: {len(current)}件\n\n"
-            for title in current.keys():
-                msg += f"・{title}\n\n"
+            msg = f"【京都府(Efftis)】「管工事・設備」自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
+            for raw_text in current.keys():
+                # 表示用に余分な空白を調整
+                clean_text = raw_text[:120]
+                msg += f"・{clean_text}\n\n"
             send_line(msg)
             print("初回/上書き通知を送信しました。")
         else:
@@ -92,9 +96,10 @@ def run():
     else:
         new_items = [t for t in current.keys() if t not in saved]
         if new_items:
-            msg = f"【京都入札】「管工事・機械設備」の新着案件を検知 ({len(new_items)}件)\n\n"
-            for title in new_items:
-                msg += f"・{title}\n\n"
+            msg = f"【京都府(Efftis)】新着案件を検知 ({len(new_items)}件)\n\n"
+            for raw_text in new_items:
+                clean_text = raw_text[:120]
+                msg += f"・{clean_text}\n\n"
             send_line(msg)
             print(f"新着{len(new_items)}件の通知を送信しました。")
         else:

@@ -66,6 +66,8 @@ def run():
                 for row in rows:
                     try:
                         text = re.sub(r'\s+', ' ', row.inner_text()).strip()
+                        if len(text) > 5:
+                            print(f"取得行: {text[:150]}")
                         if len(text) > 5 and is_target(text):
                             links = row.locator("a").all()
                             if links:

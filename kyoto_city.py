@@ -11,7 +11,7 @@ TARGET_URLS = [
 CACHE_FILE = "kyoto_city_cache.json"
 
 # 強制再通知フラグ（Trueで全件強制送信）
-FORCE_OVERWRITE = True
+FORCE_OVERWRITE = False
 
 INCLUDE_KEYWORDS = ["管工事", "機械", "設備", "空調", "衛生", "給排水", "ダクト", "ボイラー", "ポンプ"]
 

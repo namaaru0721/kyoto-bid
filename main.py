@@ -64,7 +64,6 @@ def run():
             # 2. 結果読み込み待ち
             page.wait_for_timeout(8000)
 
-            # ▼▼▼ デバッグ用に追加 ▼▼▼
             print(f"現在のページURL: {page.url}")
             for i, frame in enumerate(page.frames):
                 try:
@@ -73,7 +72,6 @@ def run():
                 except Exception as e:
                     print(f"[frame{i}] 取得失敗: {e}")
             page.screenshot(path="debug_after_search.png", full_page=True)
-            # ▲▲▲ デバッグ用に追加 ▲▲▲
 
             # 3. 検索結果一覧テーブルを持つフレームを特定
             target_frame = None
@@ -99,8 +97,7 @@ def run():
                         text = re.sub(r'\s+', ' ', raw_text).strip()
                         if len(text) > 10:
                             total_scanned += 1
-                            if total_scanned <= 3:
-                                print(f"取得サンプル[{total_scanned}]: {text[:60]}")
+                            print(f"取得サンプル[{total_scanned}]: {text[:150]}")
 
                             if is_target_project(text):
                                 current[text] = text

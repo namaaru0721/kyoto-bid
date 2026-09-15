@@ -5,21 +5,16 @@ WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-5
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
-# 対象キーワード（管工事・機械設備関連）
 INCLUDE_KEYWORDS = ["管", "機械", "設備", "空調", "衛生", "給排水", "水洗", "ダクト", "ボイラー", "ポンプ", "修繕", "改修", "浄化センター"]
-
-# 除外キーワード（無関係な工事を排除）
 EXCLUDE_KEYWORDS = ["信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路", "緑化", "剪定", "橋梁", "落石"]
 
 def is_target_project(title):
     for ex in EXCLUDE_KEYWORDS:
         if ex in title:
             return False
-            
     for inc in INCLUDE_KEYWORDS:
         if inc in title:
             return True
-            
     return False
 
 def load_data():
@@ -45,39 +40,45 @@ def run():
         page = browser.new_page()
         
         try:
-            # ページ読み込み（タイムアウト防止）
             page.goto(START_URL, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(4000)
 
-            # 全フレームから検索ボタンを探して押す
+            # 1. 各種検索ボタン（画像・ボタン・入力フォーム）を強力に検索してクリック
             btn_clicked = False
             for frame in page.frames:
-                btn = frame.locator("input[type='submit']").or_(frame.locator("input[value*='検索']")).first
-                if btn.count() > 0:
-                    btn.click()
+                search_btn = frame.locator("input[type='submit'], input[type='image'], input[value*='検索'], img[alt*='検索'], a:has-text('検索')").first
+                if search_btn.count() > 0:
+                    search_btn.click()
                     btn_clicked = True
+                    print("フレーム内の検索ボタンをクリックしました。")
                     break
             
             if not btn_clicked:
-                btn = page.locator("input[type='submit']").or_(page.locator("input[value*='検索']")).first
-                if btn.count() > 0:
-                    btn.click()
+                search_btn = page.locator("input[type='submit'], input[type='image'], input[value*='検索'], img[alt*='検索'], a:has-text('検索')").first
+                if search_btn.count() > 0:
+                    search_btn.click()
+                    print("メインページの検索ボタンをクリックしました。")
 
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(6000)
 
-            # メインページおよび全フレーム内のリンク・テキストを取得
+            # 2. 全フレーム内の <a> および <td> 要素からテキストを抽出
             frames_to_check = page.frames if page.frames else [page]
+            total_elements = 0
+
             for frame in frames_to_check:
-                for a in frame.locator("a").all():
+                elements = frame.locator("a, td").all()
+                total_elements += len(elements)
+                
+                for el in elements:
                     try:
-                        title = re.sub(r'\s+', ' ', a.inner_text()).strip()
-                        
-                        # 3文字以上かつ対象キーワードにマッチするか確認
-                        if title and len(title) > 3:
-                            if is_target_project(title):
-                                current[title] = title
+                        text = re.sub(r'\s+', ' ', el.inner_text()).strip()
+                        if text and len(text) > 3:
+                            if is_target_project(text):
+                                current[text] = text
                     except:
                         continue
+
+            print(f"スキャン対象要素数: {total_elements} 件")
 
         except Exception as e:
             print(f"エラー発生: {e}")

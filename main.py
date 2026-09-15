@@ -6,7 +6,7 @@ START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiC
 CACHE_FILE = "known_links.json"
 
 FORCE_OVERWRITE = True
-MAX_PAGES = 30  # 安全のための上限ページ数（1ページ10件なので30ページ=300件まで確認）
+MAX_PAGES = 30
 
 INCLUDE_KEYWORDS = ["管工事", "機械", "設備", "空調", "衛生", "給排水", "水洗", "ダクト", "ボイラー", "ポンプ", "修繕", "改修", "更新", "浄化センター"]
 EXCLUDE_KEYWORDS = ["管内一円", "インフラ保全", "信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路", "緑化", "剪定", "橋梁", "落石"]
@@ -50,25 +50,45 @@ def scan_rows(frame):
             continue
     return texts
 
-def go_to_next_page(frame, current_page_num):
-    """次のページ番号のリンクをクリックする。見つからなければFalseを返す。"""
-    next_label = f"{current_page_num + 1}ページ目"
+def debug_dump_links(frame):
+    """全リンクのテキストとhref/onclickを出力して、ページ送りリンクの正体を突き止める"""
     try:
-        loc = frame.get_by_text(next_label, exact=True)
-        if loc.count() > 0:
-            loc.first.click(force=True)
-            return True
-    except:
-        pass
-    # 「次へ」系のリンクも試す
-    for label in ["次へ", "次の10件", "次ページ", ">"]:
+        links = frame.locator("a").all()
+        print(f"--- リンク一覧（{len(links)}件） ---")
+        for i, link in enumerate(links):
+            try:
+                text = link.inner_text().strip()
+                href = link.get_attribute("href") or ""
+                onclick = link.get_attribute("onclick") or ""
+                if text or href or onclick:
+                    print(f"link[{i}] text='{text}' href='{href[:60]}' onclick='{onclick[:80]}'")
+            except:
+                continue
+    except Exception as e:
+        print(f"リンク一覧取得失敗: {e}")
+
+def go_to_next_page(frame, current_page_num):
+    next_num = str(current_page_num + 1)
+    candidates = [f"{next_num}ページ目", next_num]
+    for label in candidates:
         try:
             loc = frame.get_by_text(label, exact=True)
             if loc.count() > 0:
                 loc.first.click(force=True)
+                print(f"'{label}' の完全一致リンクをクリックしました。")
                 return True
         except:
-            continue
+            pass
+    # 完全一致がなければ部分一致で探す
+    for label in candidates:
+        try:
+            loc = frame.get_by_text(label, exact=False)
+            if loc.count() > 0:
+                loc.first.click(force=True)
+                print(f"'{label}' の部分一致リンクをクリックしました。")
+                return True
+        except:
+            pass
     return False
 
 def run():
@@ -122,6 +142,8 @@ def run():
                 moved = go_to_next_page(target_frame, page_num)
                 if not moved:
                     print(f"{page_num}ページ目で次のページが見つからないため終了します。")
+                    if page_num == 1:
+                        debug_dump_links(target_frame)
                     break
                 page.wait_for_timeout(3000)
                 page_num += 1

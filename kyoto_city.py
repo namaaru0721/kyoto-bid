@@ -13,13 +13,30 @@ CACHE_FILE = "kyoto_city_cache.json"
 # 強制再通知フラグ（Trueで全件強制送信）
 FORCE_OVERWRITE = False
 
-INCLUDE_KEYWORDS = ["管工事", "機械", "設備", "空調", "衛生", "給排水", "ダクト", "ボイラー", "ポンプ"]
+# 「種目」が以下に完全一致する案件のみを対象とする
+ALWAYS_TARGET_TYPES = ["管工事", "機械設備工事"]
+
+
+def extract_project_type(text):
+    """
+    行のテキストから「種目」欄を抽出する。
+    形式: <公告日(YYYY.MM.DD)> <入札No.> <種目> <案件名...> <期日>
+    種目は日付・入札No.の直後にある、空白を含まない1トークン。
+    """
+    m = re.match(r'^\d{4}\.\d{2}\.\d{2}\s+\S+\s+(\S+)\s+', text)
+    if m:
+        return m.group(1)
+    return None
+
 
 def is_target(text):
-    for inc in INCLUDE_KEYWORDS:
-        if inc in text:
-            return True
-    return False
+    project_type = extract_project_type(text)
+    if project_type is None:
+        return False, None
+    if project_type in ALWAYS_TARGET_TYPES:
+        return True, f"種目「{project_type}」は対象"
+    return False, None
+
 
 def load_data():
     if not FORCE_OVERWRITE and os.path.exists(CACHE_FILE):
@@ -66,9 +83,12 @@ def run():
                 for row in rows:
                     try:
                         text = re.sub(r'\s+', ' ', row.inner_text()).strip()
-                        if len(text) > 5:
-                            print(f"取得行: {text[:150]}")
-                        if len(text) > 5 and is_target(text):
+                        if len(text) <= 5:
+                            continue
+
+                        matched, reason = is_target(text)
+                        if matched:
+                            print(f"[該当] {reason} : {text[:150]}")
                             links = row.locator("a").all()
                             if links:
                                 href = links[0].get_attribute("href")
@@ -90,7 +110,7 @@ def run():
     if is_first:
         save_data(current)
         if current:
-            header = "【京都市単独・交通局】「管工事・設備」監視を開始しました"
+            header = "【京都市単独・交通局】「管工事」監視を開始しました"
             send_in_batches(header, current)
     else:
         new_items = {k: v for k, v in current.items() if k not in saved}

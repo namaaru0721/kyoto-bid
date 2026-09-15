@@ -5,8 +5,8 @@ WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-5
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
-# テスト送信（全件強制通知）フラグ
 FORCE_OVERWRITE = True
+MAX_PAGES = 30  # 安全のための上限ページ数（1ページ10件なので30ページ=300件まで確認）
 
 INCLUDE_KEYWORDS = ["管工事", "機械", "設備", "空調", "衛生", "給排水", "水洗", "ダクト", "ボイラー", "ポンプ", "修繕", "改修", "更新", "浄化センター"]
 EXCLUDE_KEYWORDS = ["管内一円", "インフラ保全", "信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路", "緑化", "剪定", "橋梁", "落石"]
@@ -37,6 +37,40 @@ def send_line(text):
     except Exception as e:
         print(f"LINE送信エラー: {e}")
 
+def scan_rows(frame):
+    texts = []
+    rows = frame.locator("tr").all()
+    for row in rows:
+        try:
+            raw_text = row.inner_text()
+            text = re.sub(r'\s+', ' ', raw_text).strip()
+            if len(text) > 10:
+                texts.append(text)
+        except:
+            continue
+    return texts
+
+def go_to_next_page(frame, current_page_num):
+    """次のページ番号のリンクをクリックする。見つからなければFalseを返す。"""
+    next_label = f"{current_page_num + 1}ページ目"
+    try:
+        loc = frame.get_by_text(next_label, exact=True)
+        if loc.count() > 0:
+            loc.first.click(force=True)
+            return True
+    except:
+        pass
+    # 「次へ」系のリンクも試す
+    for label in ["次へ", "次の10件", "次ページ", ">"]:
+        try:
+            loc = frame.get_by_text(label, exact=True)
+            if loc.count() > 0:
+                loc.first.click(force=True)
+                return True
+        except:
+            continue
+    return False
+
 def run():
     saved = load_data()
     is_first = len(saved) == 0 or FORCE_OVERWRITE
@@ -45,35 +79,21 @@ def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        
+
         try:
             print("Efftis初期画面へアクセス中...")
             page.goto(START_URL, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3000)
 
-            # 1. 検索ボタンの確実なクリック
-            search_clicked = False
             for frame in page.frames:
                 btn = frame.locator("input[value*='検'], input[alt*='検'], input[type='submit']").first
                 if btn.count() > 0:
                     btn.click(force=True)
-                    search_clicked = True
                     print("検索ボタンをクリックしました。")
                     break
 
-            # 2. 結果読み込み待ち
             page.wait_for_timeout(8000)
 
-            print(f"現在のページURL: {page.url}")
-            for i, frame in enumerate(page.frames):
-                try:
-                    snippet = frame.inner_text("body")[:200].replace("\n", " ")
-                    print(f"[frame{i}] url={frame.url} text_head={snippet}")
-                except Exception as e:
-                    print(f"[frame{i}] 取得失敗: {e}")
-            page.screenshot(path="debug_after_search.png", full_page=True)
-
-            # 3. 検索結果一覧テーブルを持つフレームを特定
             target_frame = None
             for frame in page.frames:
                 try:
@@ -85,26 +105,28 @@ def run():
                 except:
                     continue
 
-            target_frames = [target_frame] if target_frame else page.frames
+            if target_frame is None:
+                target_frame = page.main_frame
 
-            # 4. 行データのスキャン
             total_scanned = 0
-            for frame in target_frames:
-                rows = frame.locator("tr").all()
-                for row in rows:
-                    try:
-                        raw_text = row.inner_text()
-                        text = re.sub(r'\s+', ' ', raw_text).strip()
-                        if len(text) > 10:
-                            total_scanned += 1
-                            print(f"取得サンプル[{total_scanned}]: {text[:150]}")
+            page_num = 1
+            while page_num <= MAX_PAGES:
+                print(f"--- {page_num}ページ目をスキャン中 ---")
+                texts = scan_rows(target_frame)
+                for text in texts:
+                    total_scanned += 1
+                    print(f"取得サンプル[{total_scanned}]: {text[:150]}")
+                    if is_target_project(text):
+                        current[text] = text
 
-                            if is_target_project(text):
-                                current[text] = text
-                    except:
-                        continue
+                moved = go_to_next_page(target_frame, page_num)
+                if not moved:
+                    print(f"{page_num}ページ目で次のページが見つからないため終了します。")
+                    break
+                page.wait_for_timeout(3000)
+                page_num += 1
 
-            print(f"総スキャン行数: {total_scanned}行")
+            print(f"総スキャン行数: {total_scanned}行 ／ 総スキャンページ数: {page_num}ページ")
 
         except Exception as e:
             print(f"エラー発生: {e}")

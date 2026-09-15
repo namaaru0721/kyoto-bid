@@ -50,45 +50,26 @@ def scan_rows(frame):
             continue
     return texts
 
-def debug_dump_links(frame):
-    """全リンクのテキストとhref/onclickを出力して、ページ送りリンクの正体を突き止める"""
-    try:
-        links = frame.locator("a").all()
-        print(f"--- リンク一覧（{len(links)}件） ---")
-        for i, link in enumerate(links):
-            try:
-                text = link.inner_text().strip()
-                href = link.get_attribute("href") or ""
-                onclick = link.get_attribute("onclick") or ""
-                if text or href or onclick:
-                    print(f"link[{i}] text='{text}' href='{href[:60]}' onclick='{onclick[:80]}'")
-            except:
-                continue
-    except Exception as e:
-        print(f"リンク一覧取得失敗: {e}")
-
 def go_to_next_page(frame, current_page_num):
+    """<a>タグに限定してページ送りリンクを探す（表内の数字セルとの誤認を防ぐ）"""
     next_num = str(current_page_num + 1)
-    candidates = [f"{next_num}ページ目", next_num]
-    for label in candidates:
+    target_texts = [f"{next_num}ページ目", next_num]
+    links = frame.locator("a")
+    count = links.count()
+    for i in range(count):
+        link = links.nth(i)
         try:
-            loc = frame.get_by_text(label, exact=True)
-            if loc.count() > 0:
-                loc.first.click(force=True)
-                print(f"'{label}' の完全一致リンクをクリックしました。")
-                return True
+            text = link.inner_text().strip()
         except:
-            pass
-    # 完全一致がなければ部分一致で探す
-    for label in candidates:
-        try:
-            loc = frame.get_by_text(label, exact=False)
-            if loc.count() > 0:
-                loc.first.click(force=True)
-                print(f"'{label}' の部分一致リンクをクリックしました。")
+            continue
+        if text in target_texts:
+            try:
+                link.click(force=True)
+                print(f"<a>タグ '{text}'（{i}番目のリンク）をクリックしました。")
                 return True
-        except:
-            pass
+            except Exception as e:
+                print(f"クリック失敗: {e}")
+                continue
     return False
 
 def run():
@@ -130,9 +111,20 @@ def run():
 
             total_scanned = 0
             page_num = 1
+            prev_first_row = None
+
             while page_num <= MAX_PAGES:
                 print(f"--- {page_num}ページ目をスキャン中 ---")
                 texts = scan_rows(target_frame)
+
+                # ページが本当に切り替わったかチェック（表の1件目の内容で比較）
+                data_rows = [t for t in texts if re.match(r'^\d+\s', t)]
+                current_first_row = data_rows[0] if data_rows else None
+                if page_num > 1 and current_first_row == prev_first_row:
+                    print(f"警告: {page_num}ページ目の内容が前ページと同一です。ページ送りが実際には機能していない可能性があります。処理を中断します。")
+                    break
+                prev_first_row = current_first_row
+
                 for text in texts:
                     total_scanned += 1
                     print(f"取得サンプル[{total_scanned}]: {text[:150]}")
@@ -142,8 +134,6 @@ def run():
                 moved = go_to_next_page(target_frame, page_num)
                 if not moved:
                     print(f"{page_num}ページ目で次のページが見つからないため終了します。")
-                    if page_num == 1:
-                        debug_dump_links(target_frame)
                     break
                 page.wait_for_timeout(3000)
                 page_num += 1

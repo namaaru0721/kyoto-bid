@@ -5,20 +5,56 @@ WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-5
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
-FORCE_OVERWRITE = True
+FORCE_OVERWRITE = False  # デバッグ完了後はFalseに戻します（新着のみ通知）
 MAX_PAGES = 30  # 1ページ10件なので30ページ=300件まで確認。全704件見たいなら71に増やす
 
-INCLUDE_KEYWORDS = ["管工事", "機械", "設備", "空調", "衛生", "給排水", "水洗", "ダクト", "ボイラー", "ポンプ", "修繕", "改修", "更新", "浄化センター"]
-EXCLUDE_KEYWORDS = ["管内一円", "インフラ保全", "信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路", "緑化", "剪定", "橋梁", "落石"]
+# ① この種別は無条件で対象（御社の本業そのもの）
+ALWAYS_TARGET_TYPES = ["管工事"]
 
-def is_target_project(title):
-    for ex in EXCLUDE_KEYWORDS:
-        if ex in title:
-            return False
-    for inc in INCLUDE_KEYWORDS:
-        if inc in title:
-            return True
-    return False
+# ② この種別は、タイトルに以下のキーワードが含まれる場合のみ対象
+#    （ポンプ・エレベーター等、水回りと無関係な「機械もの」を除外するため）
+CONDITIONAL_TARGET_TYPES = {
+    "機械器具設置工事": [
+        "給排水", "衛生", "浄水", "浄化", "配管", "揚水", "ポンプ",
+        "受水槽", "消火", "空調", "ろ過", "排水処理", "水道", "汚水",
+        "雑排水", "浄化槽", "受水", "加圧給水", "給水", "排水", "ダクト", "ボイラー",
+    ],
+    "建築一式工事": [
+        "トイレ", "便所", "衛生設備", "給排水", "浄化槽",
+    ],
+}
+
+# ②の種別で、以下のキーワードが含まれる場合は上のキーワードに一致していても除外
+#    （昇降機・電光掲示板など、機械器具設置工事の中の無関係カテゴリを弾く）
+MECH_EXCLUDE_KEYWORDS = ["昇降機", "エレベーター", "電光", "表示板", "スコアボード", "監視装置", "制御装置"]
+
+
+def extract_project_type(text):
+    """テキストから「種別」欄を抽出する。種別は 入札方式（一般競争入札/指名競争入札）の直前のトークン。"""
+    matches = list(re.finditer(r'(\S+工事(?:\([^)]*\))?)\s+(一般競争入札|指名競争入札)', text))
+    if matches:
+        return matches[-1].group(1)
+    return None
+
+
+def is_target_project(text):
+    project_type = extract_project_type(text)
+    if project_type is None:
+        return False, None
+
+    if project_type in ALWAYS_TARGET_TYPES:
+        return True, f"種別「{project_type}」は無条件対象"
+
+    if project_type in CONDITIONAL_TARGET_TYPES:
+        for ex in MECH_EXCLUDE_KEYWORDS:
+            if ex in text:
+                return False, None
+        for kw in CONDITIONAL_TARGET_TYPES[project_type]:
+            if kw in text:
+                return True, f"種別「{project_type}」＋キーワード「{kw}」に一致"
+
+    return False, None
+
 
 def load_data():
     if not FORCE_OVERWRITE and os.path.exists(CACHE_FILE):
@@ -51,10 +87,6 @@ def scan_rows(frame):
     return texts
 
 def go_to_page_by_index(frame, page_index_value):
-    """
-    ページ送りは<select onchange="changeDisplayIndex(this.value)">のプルダウン。
-    value は 0, 10, 20... の10刻み（1ページ目=0, 2ページ目=10, 3ページ目=20...）。
-    """
     try:
         select = frame.locator("select").first
         if select.count() == 0:
@@ -119,11 +151,11 @@ def run():
 
                 for text in texts:
                     total_scanned += 1
-                    print(f"取得サンプル[{total_scanned}]: {text[:150]}")
-                    if is_target_project(text):
+                    matched, reason = is_target_project(text)
+                    if matched:
+                        print(f"[該当] {reason} : {text[:120]}")
                         current[text] = text
 
-                # 次ページの value は現在のページ番号(1始まり) * 10
                 next_value = page_num * 10
                 moved = go_to_page_by_index(target_frame, next_value)
                 if not moved:

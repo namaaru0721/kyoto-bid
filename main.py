@@ -5,10 +5,10 @@ WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-5
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
-# テスト時や強制再通知したい場合は True に変更
+# テスト送信用に True に設定中（確認完了後に False に戻してください）
 FORCE_OVERWRITE = True
 
-INCLUDE_KEYWORDS = ["管工事", "機械", "設備", "空調", "衛生", "給排水", "水洗", "ダクト", "ボイラー", "ポンプ", "修繕", "改修", "浄化センター"]
+INCLUDE_KEYWORDS = ["管工事", "機械", "設備", "空調", "衛生", "給排水", "水洗", "ダクト", "ボイラー", "ポンプ", "修繕", "改修", "更新", "浄化センター"]
 EXCLUDE_KEYWORDS = ["管内一円", "インフラ保全", "信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路", "緑化", "剪定", "橋梁", "落石"]
 
 def is_target_project(title):
@@ -32,7 +32,8 @@ def save_data(data):
 
 def send_line(text):
     try:
-        requests.post(WEBHOOK_URL, json={"title": "京都府入札(Efftis)", "body": {"text": text}})
+        res = requests.post(WEBHOOK_URL, json={"title": "京都府入札(Efftis)", "body": {"text": text}})
+        print(f"LINE送信結果: {res.status_code}")
     except Exception as e:
         print(f"LINE送信エラー: {e}")
 
@@ -47,29 +48,36 @@ def run():
         
         try:
             page.goto(START_URL, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(4000)
 
-            # 全フレームからEfftis特有の検索ボタンを探してクリック
-            btn_clicked = False
+            # 1. 全フレームを巡回して検索ボタンをクリック
+            clicked = False
             for frame in page.frames:
-                btn = frame.locator("input[value*='検'], input[value*='検索'], input[type='submit'], img[alt*='検索']").first
-                if btn.count() > 0:
-                    btn.click()
-                    btn_clicked = True
-                    print("検索ボタンをクリックしました。")
+                for selector in ["input[value*='検']", "input[type='submit']", "img[alt*='検']", "button"]:
+                    btn = frame.locator(selector).first
+                    if btn.count() > 0:
+                        btn.click(force=True)
+                        clicked = True
+                        print(f"フレーム内で検索ボタンを検出・クリックしました: Selector={selector}")
+                        break
+                if clicked:
                     break
 
-            # 一覧テーブルの読み込み待ち
-            page.wait_for_timeout(6000)
+            # 2. 結果画面（新規フレーム）のレンダリング待ち
+            page.wait_for_timeout(8000)
 
-            # 一覧表の全行（tr）を取得して「管工事・設備案件」を抽出
-            frames_to_check = page.frames if page.frames else [page]
-            for frame in frames_to_check:
+            # 3. 再最新化した全フレームからテーブル行を取得
+            all_frames = page.frames
+            print(f"検出対象フレーム数: {len(all_frames)}")
+
+            for idx, frame in enumerate(all_frames):
                 rows = frame.locator("tr").all()
+                print(f"フレーム[{idx}] 内の行数: {len(rows)}")
+                
                 for row in rows:
                     try:
                         text = re.sub(r'\s+', ' ', row.inner_text()).strip()
-                        if len(text) > 10 and is_target_project(text):
+                        if len(text) > 8 and is_target_project(text):
                             current[text] = text
                     except:
                         continue
@@ -84,13 +92,15 @@ def run():
     if is_first:
         save_data(current)
         if current:
-            msg = f"【京都府(Efftis)】「管工事・設備」自動監視を開始しました。\n現在検出数: {len(current)}件\n\n"
-            for raw_text in current.keys():
-                # 表示用に余分な空白を調整
-                clean_text = raw_text[:120]
-                msg += f"・{clean_text}\n\n"
-            send_line(msg)
-            print("初回/上書き通知を送信しました。")
+            items = list(current.keys())
+            batch_size = 5
+            for i in range(0, len(items), batch_size):
+                chunk = items[i:i + batch_size]
+                msg = f"【京都府(Efftis)】「管工事・設備」自動監視を更新しました ({i+1}~{i+len(chunk)}件 / 全{len(items)}件)\n\n"
+                for raw_text in chunk:
+                    msg += f"・{raw_text[:100]}\n\n"
+                send_line(msg)
+            print("LINEへの分割送信を完了しました。")
         else:
             print("該当案件は0件でした。")
     else:
@@ -98,13 +108,8 @@ def run():
         if new_items:
             msg = f"【京都府(Efftis)】新着案件を検知 ({len(new_items)}件)\n\n"
             for raw_text in new_items:
-                clean_text = raw_text[:120]
-                msg += f"・{clean_text}\n\n"
+                msg += f"・{raw_text[:100]}\n\n"
             send_line(msg)
-            print(f"新着{len(new_items)}件の通知を送信しました。")
-        else:
-            print("新着案件はありませんでした。")
-            
         save_data(current)
 
 if __name__ == "__main__":

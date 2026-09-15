@@ -50,8 +50,39 @@ def scan_rows(frame):
             continue
     return texts
 
+def debug_dump_all_clickables(frame):
+    """<a>タグと、onclick属性を持つ全要素を出力する"""
+    print("=== <a>タグ一覧 ===")
+    try:
+        links = frame.locator("a").all()
+        print(f"件数: {len(links)}")
+        for i, link in enumerate(links):
+            try:
+                text = link.inner_text().strip()
+                href = (link.get_attribute("href") or "")[:80]
+                onclick = (link.get_attribute("onclick") or "")[:100]
+                print(f"a[{i}] text='{text}' href='{href}' onclick='{onclick}'")
+            except Exception as e:
+                print(f"a[{i}] 取得失敗: {e}")
+    except Exception as e:
+        print(f"<a>タグ取得失敗: {e}")
+
+    print("=== onclick属性を持つ全要素一覧 ===")
+    try:
+        clickables = frame.locator("[onclick]").all()
+        print(f"件数: {len(clickables)}")
+        for i, el in enumerate(clickables):
+            try:
+                tag = el.evaluate("e => e.tagName")
+                text = el.inner_text().strip()[:40]
+                onclick = (el.get_attribute("onclick") or "")[:100]
+                print(f"onclick[{i}] tag={tag} text='{text}' onclick='{onclick}'")
+            except Exception as e:
+                print(f"onclick[{i}] 取得失敗: {e}")
+    except Exception as e:
+        print(f"onclick要素取得失敗: {e}")
+
 def go_to_next_page(frame, current_page_num):
-    """<a>タグに限定してページ送りリンクを探す（表内の数字セルとの誤認を防ぐ）"""
     next_num = str(current_page_num + 1)
     target_texts = [f"{next_num}ページ目", next_num]
     links = frame.locator("a")
@@ -117,11 +148,10 @@ def run():
                 print(f"--- {page_num}ページ目をスキャン中 ---")
                 texts = scan_rows(target_frame)
 
-                # ページが本当に切り替わったかチェック（表の1件目の内容で比較）
                 data_rows = [t for t in texts if re.match(r'^\d+\s', t)]
                 current_first_row = data_rows[0] if data_rows else None
                 if page_num > 1 and current_first_row == prev_first_row:
-                    print(f"警告: {page_num}ページ目の内容が前ページと同一です。ページ送りが実際には機能していない可能性があります。処理を中断します。")
+                    print(f"警告: {page_num}ページ目の内容が前ページと同一です。処理を中断します。")
                     break
                 prev_first_row = current_first_row
 
@@ -134,6 +164,8 @@ def run():
                 moved = go_to_next_page(target_frame, page_num)
                 if not moved:
                     print(f"{page_num}ページ目で次のページが見つからないため終了します。")
+                    if page_num == 1:
+                        debug_dump_all_clickables(target_frame)
                     break
                 page.wait_for_timeout(3000)
                 page_num += 1

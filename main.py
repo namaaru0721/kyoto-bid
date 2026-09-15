@@ -6,7 +6,7 @@ START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiC
 CACHE_FILE = "known_links.json"
 
 FORCE_OVERWRITE = False  # デバッグ完了後はFalseにしています（新着のみ通知）
-MAX_PAGES = 71  # 1ページ10件なので30ページ=300件まで確認。全704件見たいなら71に増やす
+MAX_PAGES = 15  # 1ページ10件なので15ページ=150件。1日2回（9:30・17:00）の巡回間隔に十分な余裕分
 
 # 「種別」が以下に完全一致する案件のみを対象とする
 ALWAYS_TARGET_TYPES = ["管工事", "機械設備工事"]

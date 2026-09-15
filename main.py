@@ -5,7 +5,7 @@ WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-5
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
-# テスト送信用に True に設定中（確認完了後に False に戻してください）
+# テスト送信（全件強制通知）フラグ
 FORCE_OVERWRITE = True
 
 INCLUDE_KEYWORDS = ["管工事", "機械", "設備", "空調", "衛生", "給排水", "水洗", "ダクト", "ボイラー", "ポンプ", "修繕", "改修", "更新", "浄化センター"]
@@ -47,40 +47,48 @@ def run():
         page = browser.new_page()
         
         try:
-            page.goto(START_URL, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(4000)
+            page.goto(START_URL, wait_until="networkidle", timeout=60000)
+            page.wait_for_timeout(3000)
 
-            # 1. 全フレームを巡回して検索ボタンをクリック
-            clicked = False
+            # 1. 検索実行（JS実行 & ボタンクリックの両方に対応）
+            search_done = False
             for frame in page.frames:
-                for selector in ["input[value*='検']", "input[type='submit']", "img[alt*='検']", "button"]:
-                    btn = frame.locator(selector).first
+                try:
+                    # JavaScriptで直接フォーム送信を起動
+                    frame.evaluate("if(typeof doSearch === 'function'){ doSearch(); } else if(document.forms[0]){ document.forms[0].submit(); }")
+                    search_done = True
+                    print("JavaScript経由で検索を実行しました。")
+                    break
+                except:
+                    pass
+
+            if not search_done:
+                for frame in page.frames:
+                    btn = frame.locator("input[value*='検'], input[type='submit']").first
                     if btn.count() > 0:
                         btn.click(force=True)
-                        clicked = True
-                        print(f"フレーム内で検索ボタンを検出・クリックしました: Selector={selector}")
+                        print("ボタン直接クリックで検索を実行しました。")
                         break
-                if clicked:
-                    break
 
-            # 2. 結果画面（新規フレーム）のレンダリング待ち
-            page.wait_for_timeout(8000)
-
-            # 3. 再最新化した全フレームからテーブル行を取得
-            all_frames = page.frames
-            print(f"検出対象フレーム数: {len(all_frames)}")
-
-            for idx, frame in enumerate(all_frames):
+            # 2. 結果テーブルの表示（「案件名称」テキストの出現）を最大15秒待機
+            page.wait_for_timeout(7000)
+            
+            # 3. 全フレームから「案件名称」が含まれるテーブルの行を優先解析
+            found_rows = 0
+            for idx, frame in enumerate(page.frames):
                 rows = frame.locator("tr").all()
-                print(f"フレーム[{idx}] 内の行数: {len(rows)}")
-                
                 for row in rows:
                     try:
                         text = re.sub(r'\s+', ' ', row.inner_text()).strip()
-                        if len(text) > 8 and is_target_project(text):
-                            current[text] = text
+                        # 表の見出し行やフォーム行を除外し、案件情報を取得
+                        if "案件名称" not in text and len(text) > 15:
+                            found_rows += 1
+                            if is_target_project(text):
+                                current[text] = text
                     except:
                         continue
+
+            print(f"スキャン対象案件行数: {found_rows} 行")
 
         except Exception as e:
             print(f"エラー発生: {e}")
@@ -98,9 +106,9 @@ def run():
                 chunk = items[i:i + batch_size]
                 msg = f"【京都府(Efftis)】「管工事・設備」自動監視を更新しました ({i+1}~{i+len(chunk)}件 / 全{len(items)}件)\n\n"
                 for raw_text in chunk:
-                    msg += f"・{raw_text[:100]}\n\n"
+                    msg += f"・{raw_text[:120]}\n\n"
                 send_line(msg)
-            print("LINEへの分割送信を完了しました。")
+            print("LINEへの通知送信を完了しました。")
         else:
             print("該当案件は0件でした。")
     else:
@@ -108,7 +116,7 @@ def run():
         if new_items:
             msg = f"【京都府(Efftis)】新着案件を検知 ({len(new_items)}件)\n\n"
             for raw_text in new_items:
-                msg += f"・{raw_text[:100]}\n\n"
+                msg += f"・{raw_text[:120]}\n\n"
             send_line(msg)
         save_data(current)
 

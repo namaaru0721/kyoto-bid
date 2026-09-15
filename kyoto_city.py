@@ -11,7 +11,7 @@ TARGET_URLS = [
 CACHE_FILE = "kyoto_city_cache.json"
 
 # 強制再通知フラグ（Trueで全件強制送信）
-FORCE_OVERWRITE = False
+FORCE_OVERWRITE = True
 
 # 「種目」が以下に完全一致する案件のみを対象とする
 ALWAYS_TARGET_TYPES = ["管工事", "機械設備工事"]

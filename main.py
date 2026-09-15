@@ -6,7 +6,7 @@ START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiC
 CACHE_FILE = "known_links.json"
 
 FORCE_OVERWRITE = True
-MAX_PAGES = 30
+MAX_PAGES = 30  # 1ページ10件なので30ページ=300件まで確認。全704件見たいなら71に増やす
 
 INCLUDE_KEYWORDS = ["管工事", "機械", "設備", "空調", "衛生", "給排水", "水洗", "ダクト", "ボイラー", "ポンプ", "修繕", "改修", "更新", "浄化センター"]
 EXCLUDE_KEYWORDS = ["管内一円", "インフラ保全", "信号", "標示", "電柱", "通学路", "治山", "舗装", "標識", "白線", "道路", "緑化", "剪定", "橋梁", "落石"]
@@ -50,75 +50,20 @@ def scan_rows(frame):
             continue
     return texts
 
-def debug_dump_pagination_element(frame):
-    """「2ページ目」というテキストを持つ要素そのものを、タグ種類を問わず特定する"""
-    print("=== 「2ページ目」要素の正体調査 ===")
+def go_to_page_by_index(frame, page_index_value):
+    """
+    ページ送りは<select onchange="changeDisplayIndex(this.value)">のプルダウン。
+    value は 0, 10, 20... の10刻み（1ページ目=0, 2ページ目=10, 3ページ目=20...）。
+    """
     try:
-        loc = frame.locator(":text-is('2ページ目')")
-        count = loc.count()
-        print(f"完全一致する要素数: {count}")
-        for i in range(count):
-            el = loc.nth(i)
-            try:
-                info = el.evaluate("""e => ({
-                    tag: e.tagName,
-                    id: e.id,
-                    className: e.className,
-                    outerHTMLHead: e.outerHTML.slice(0, 300),
-                    parentTag: e.parentElement ? e.parentElement.tagName : null,
-                    parentOnclick: e.parentElement ? e.parentElement.getAttribute('onclick') : null,
-                    parentHref: e.parentElement ? e.parentElement.getAttribute('href') : null
-                })""")
-                print(f"[{i}] {info}")
-            except Exception as e:
-                print(f"[{i}] evaluate失敗: {e}")
+        select = frame.locator("select").first
+        if select.count() == 0:
+            return False
+        select.select_option(value=str(page_index_value))
+        return True
     except Exception as e:
-        print(f"text-is検索失敗: {e}")
-
-    print("=== <select>タグ一覧（プルダウン形式のページ送りの可能性） ===")
-    try:
-        selects = frame.locator("select").all()
-        print(f"件数: {len(selects)}")
-        for i, sel in enumerate(selects):
-            try:
-                html = sel.evaluate("e => e.outerHTML.slice(0, 500)")
-                print(f"select[{i}]: {html}")
-            except Exception as e:
-                print(f"select[{i}] 取得失敗: {e}")
-    except Exception as e:
-        print(f"select取得失敗: {e}")
-
-def go_to_next_page(frame, current_page_num):
-    next_num = str(current_page_num + 1)
-    target_texts = [f"{next_num}ページ目", next_num]
-    links = frame.locator("a")
-    count = links.count()
-    for i in range(count):
-        link = links.nth(i)
-        try:
-            text = link.inner_text().strip()
-        except:
-            continue
-        if text in target_texts:
-            try:
-                link.click(force=True)
-                print(f"<a>タグ '{text}'（{i}番目のリンク）をクリックしました。")
-                return True
-            except Exception as e:
-                print(f"クリック失敗: {e}")
-                continue
-
-    # <a>で見つからなければ、テキスト完全一致する任意の要素をクリックしてみる
-    try:
-        loc = frame.locator(f":text-is('{next_num}ページ目')")
-        if loc.count() > 0:
-            loc.first.click(force=True)
-            print(f"任意要素 '{next_num}ページ目' をクリックしました（タグ種類不明）。")
-            return True
-    except Exception as e:
-        print(f"任意要素クリック失敗: {e}")
-
-    return False
+        print(f"ページ送り失敗(value={page_index_value}): {e}")
+        return False
 
 def run():
     saved = load_data()
@@ -178,12 +123,13 @@ def run():
                     if is_target_project(text):
                         current[text] = text
 
-                moved = go_to_next_page(target_frame, page_num)
+                # 次ページの value は現在のページ番号(1始まり) * 10
+                next_value = page_num * 10
+                moved = go_to_page_by_index(target_frame, next_value)
                 if not moved:
-                    print(f"{page_num}ページ目で次のページが見つからないため終了します。")
-                    if page_num == 1:
-                        debug_dump_pagination_element(target_frame)
+                    print(f"{page_num}ページ目で次のページへ移動できなかったため終了します。")
                     break
+
                 page.wait_for_timeout(3000)
                 page_num += 1
 

@@ -50,37 +50,43 @@ def scan_rows(frame):
             continue
     return texts
 
-def debug_dump_all_clickables(frame):
-    """<a>タグと、onclick属性を持つ全要素を出力する"""
-    print("=== <a>タグ一覧 ===")
+def debug_dump_pagination_element(frame):
+    """「2ページ目」というテキストを持つ要素そのものを、タグ種類を問わず特定する"""
+    print("=== 「2ページ目」要素の正体調査 ===")
     try:
-        links = frame.locator("a").all()
-        print(f"件数: {len(links)}")
-        for i, link in enumerate(links):
+        loc = frame.locator(":text-is('2ページ目')")
+        count = loc.count()
+        print(f"完全一致する要素数: {count}")
+        for i in range(count):
+            el = loc.nth(i)
             try:
-                text = link.inner_text().strip()
-                href = (link.get_attribute("href") or "")[:80]
-                onclick = (link.get_attribute("onclick") or "")[:100]
-                print(f"a[{i}] text='{text}' href='{href}' onclick='{onclick}'")
+                info = el.evaluate("""e => ({
+                    tag: e.tagName,
+                    id: e.id,
+                    className: e.className,
+                    outerHTMLHead: e.outerHTML.slice(0, 300),
+                    parentTag: e.parentElement ? e.parentElement.tagName : null,
+                    parentOnclick: e.parentElement ? e.parentElement.getAttribute('onclick') : null,
+                    parentHref: e.parentElement ? e.parentElement.getAttribute('href') : null
+                })""")
+                print(f"[{i}] {info}")
             except Exception as e:
-                print(f"a[{i}] 取得失敗: {e}")
+                print(f"[{i}] evaluate失敗: {e}")
     except Exception as e:
-        print(f"<a>タグ取得失敗: {e}")
+        print(f"text-is検索失敗: {e}")
 
-    print("=== onclick属性を持つ全要素一覧 ===")
+    print("=== <select>タグ一覧（プルダウン形式のページ送りの可能性） ===")
     try:
-        clickables = frame.locator("[onclick]").all()
-        print(f"件数: {len(clickables)}")
-        for i, el in enumerate(clickables):
+        selects = frame.locator("select").all()
+        print(f"件数: {len(selects)}")
+        for i, sel in enumerate(selects):
             try:
-                tag = el.evaluate("e => e.tagName")
-                text = el.inner_text().strip()[:40]
-                onclick = (el.get_attribute("onclick") or "")[:100]
-                print(f"onclick[{i}] tag={tag} text='{text}' onclick='{onclick}'")
+                html = sel.evaluate("e => e.outerHTML.slice(0, 500)")
+                print(f"select[{i}]: {html}")
             except Exception as e:
-                print(f"onclick[{i}] 取得失敗: {e}")
+                print(f"select[{i}] 取得失敗: {e}")
     except Exception as e:
-        print(f"onclick要素取得失敗: {e}")
+        print(f"select取得失敗: {e}")
 
 def go_to_next_page(frame, current_page_num):
     next_num = str(current_page_num + 1)
@@ -101,6 +107,17 @@ def go_to_next_page(frame, current_page_num):
             except Exception as e:
                 print(f"クリック失敗: {e}")
                 continue
+
+    # <a>で見つからなければ、テキスト完全一致する任意の要素をクリックしてみる
+    try:
+        loc = frame.locator(f":text-is('{next_num}ページ目')")
+        if loc.count() > 0:
+            loc.first.click(force=True)
+            print(f"任意要素 '{next_num}ページ目' をクリックしました（タグ種類不明）。")
+            return True
+    except Exception as e:
+        print(f"任意要素クリック失敗: {e}")
+
     return False
 
 def run():
@@ -165,7 +182,7 @@ def run():
                 if not moved:
                     print(f"{page_num}ページ目で次のページが見つからないため終了します。")
                     if page_num == 1:
-                        debug_dump_all_clickables(target_frame)
+                        debug_dump_pagination_element(target_frame)
                     break
                 page.wait_for_timeout(3000)
                 page_num += 1

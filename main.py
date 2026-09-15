@@ -47,48 +47,67 @@ def run():
         page = browser.new_page()
         
         try:
-            page.goto(START_URL, wait_until="networkidle", timeout=60000)
+            print("Efftis初期画面へアクセス中...")
+            page.goto(START_URL, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(3000)
 
-            # 1. 検索実行（JS実行 & ボタンクリックの両方に対応）
-            search_done = False
+            # 1. 検索ボタンの確実なクリック
+            search_clicked = False
+            for frame in page.frames:
+                btn = frame.locator("input[value*='検'], input[alt*='検'], input[type='submit']").first
+                if btn.count() > 0:
+                    btn.click(force=True)
+                    search_clicked = True
+                    print("検索ボタンをクリックしました。")
+                    break
+
+            # 2. 結果読み込み待ち
+            page.wait_for_timeout(8000)
+
+            # ▼▼▼ デバッグ用に追加 ▼▼▼
+            print(f"現在のページURL: {page.url}")
+            for i, frame in enumerate(page.frames):
+                try:
+                    snippet = frame.inner_text("body")[:200].replace("\n", " ")
+                    print(f"[frame{i}] url={frame.url} text_head={snippet}")
+                except Exception as e:
+                    print(f"[frame{i}] 取得失敗: {e}")
+            page.screenshot(path="debug_after_search.png", full_page=True)
+            # ▲▲▲ デバッグ用に追加 ▲▲▲
+
+            # 3. 検索結果一覧テーブルを持つフレームを特定
+            target_frame = None
             for frame in page.frames:
                 try:
-                    # JavaScriptで直接フォーム送信を起動
-                    frame.evaluate("if(typeof doSearch === 'function'){ doSearch(); } else if(document.forms[0]){ document.forms[0].submit(); }")
-                    search_done = True
-                    print("JavaScript経由で検索を実行しました。")
-                    break
-                except:
-                    pass
-
-            if not search_done:
-                for frame in page.frames:
-                    btn = frame.locator("input[value*='検'], input[type='submit']").first
-                    if btn.count() > 0:
-                        btn.click(force=True)
-                        print("ボタン直接クリックで検索を実行しました。")
+                    body_text = frame.inner_text("body")
+                    if "工事場所" in body_text or "資料配布" in body_text or "案件名称" in body_text:
+                        target_frame = frame
+                        print(f"結果テーブルを含むフレームを特定しました: {frame.url}")
                         break
+                except:
+                    continue
 
-            # 2. 結果テーブルの表示（「案件名称」テキストの出現）を最大15秒待機
-            page.wait_for_timeout(7000)
-            
-            # 3. 全フレームから「案件名称」が含まれるテーブルの行を優先解析
-            found_rows = 0
-            for idx, frame in enumerate(page.frames):
+            target_frames = [target_frame] if target_frame else page.frames
+
+            # 4. 行データのスキャン
+            total_scanned = 0
+            for frame in target_frames:
                 rows = frame.locator("tr").all()
                 for row in rows:
                     try:
-                        text = re.sub(r'\s+', ' ', row.inner_text()).strip()
-                        # 表の見出し行やフォーム行を除外し、案件情報を取得
-                        if "案件名称" not in text and len(text) > 15:
-                            found_rows += 1
+                        raw_text = row.inner_text()
+                        text = re.sub(r'\s+', ' ', raw_text).strip()
+                        if len(text) > 10:
+                            total_scanned += 1
+                            if total_scanned <= 3:
+                                print(f"取得サンプル[{total_scanned}]: {text[:60]}")
+
                             if is_target_project(text):
                                 current[text] = text
                     except:
                         continue
 
-            print(f"スキャン対象案件行数: {found_rows} 行")
+            print(f"総スキャン行数: {total_scanned}行")
 
         except Exception as e:
             print(f"エラー発生: {e}")

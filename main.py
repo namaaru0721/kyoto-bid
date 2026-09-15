@@ -5,28 +5,11 @@ WEBHOOK_URL = "https://webhook.worksmobile.com/message/98a5731f-7764-4495-9bc6-5
 START_URL = "https://kyoto.efftis.jp/26000/CALS/PPI_P/pages/PPI_P/PiCtBaFi02/PiCtBaFi02start.vm"
 CACHE_FILE = "known_links.json"
 
-FORCE_OVERWRITE = False  # デバッグ完了後はFalseに戻します（新着のみ通知）
+FORCE_OVERWRITE = False  # デバッグ完了後はFalseにしています（新着のみ通知）
 MAX_PAGES = 30  # 1ページ10件なので30ページ=300件まで確認。全704件見たいなら71に増やす
 
-# ① この種別は無条件で対象（御社の本業そのもの）
-ALWAYS_TARGET_TYPES = ["管工事"]
-
-# ② この種別は、タイトルに以下のキーワードが含まれる場合のみ対象
-#    （ポンプ・エレベーター等、水回りと無関係な「機械もの」を除外するため）
-CONDITIONAL_TARGET_TYPES = {
-    "機械器具設置工事": [
-        "給排水", "衛生", "浄水", "浄化", "配管", "揚水", "ポンプ",
-        "受水槽", "消火", "空調", "ろ過", "排水処理", "水道", "汚水",
-        "雑排水", "浄化槽", "受水", "加圧給水", "給水", "排水", "ダクト", "ボイラー",
-    ],
-    "建築一式工事": [
-        "トイレ", "便所", "衛生設備", "給排水", "浄化槽",
-    ],
-}
-
-# ②の種別で、以下のキーワードが含まれる場合は上のキーワードに一致していても除外
-#    （昇降機・電光掲示板など、機械器具設置工事の中の無関係カテゴリを弾く）
-MECH_EXCLUDE_KEYWORDS = ["昇降機", "エレベーター", "電光", "表示板", "スコアボード", "監視装置", "制御装置"]
+# 「種別」が以下に完全一致する案件のみを対象とする
+ALWAYS_TARGET_TYPES = ["管工事", "機械設備工事"]
 
 
 def extract_project_type(text):
@@ -43,15 +26,7 @@ def is_target_project(text):
         return False, None
 
     if project_type in ALWAYS_TARGET_TYPES:
-        return True, f"種別「{project_type}」は無条件対象"
-
-    if project_type in CONDITIONAL_TARGET_TYPES:
-        for ex in MECH_EXCLUDE_KEYWORDS:
-            if ex in text:
-                return False, None
-        for kw in CONDITIONAL_TARGET_TYPES[project_type]:
-            if kw in text:
-                return True, f"種別「{project_type}」＋キーワード「{kw}」に一致"
+        return True, f"種別「{project_type}」は対象"
 
     return False, None
 
@@ -181,7 +156,7 @@ def run():
             batch_size = 5
             for i in range(0, len(items), batch_size):
                 chunk = items[i:i + batch_size]
-                msg = f"【京都府(Efftis)】「管工事・設備」自動監視を更新しました ({i+1}~{i+len(chunk)}件 / 全{len(items)}件)\n\n"
+                msg = f"【京都府(Efftis)】「管工事」自動監視を更新しました ({i+1}~{i+len(chunk)}件 / 全{len(items)}件)\n\n"
                 for raw_text in chunk:
                     msg += f"・{raw_text[:120]}\n\n"
                 send_line(msg)

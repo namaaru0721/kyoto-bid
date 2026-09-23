@@ -31,10 +31,24 @@ def is_target_project(text):
     return False, None
 
 
+def normalize_key(text):
+    """
+    先頭の行番号（一覧内の表示順）を取り除き、内容だけで一意なキーを作る。
+    Efftisの一覧は新着案件が上に追加されるため、同じ案件でも時間が経つと
+    先頭の通し番号がズレる（例: 44 → 68）。番号込みで判定すると毎回「新着」と
+    誤検知してしまうため、番号を除いた本文だけを重複判定のキーにする。
+    """
+    return re.sub(r'^\d+\s+', '', text)
+
+
 def load_data():
     if not FORCE_OVERWRITE and os.path.exists(CACHE_FILE):
         try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f: return json.load(f)
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            # 旧形式（先頭に行番号が入ったキー）で保存されていた場合も、
+            # 読み込み時に正規化して移行する
+            return {normalize_key(k): v for k, v in raw.items()}
         except: return {}
     return {}
 
@@ -129,7 +143,7 @@ def run():
                     matched, reason = is_target_project(text)
                     if matched:
                         print(f"[該当] {reason} : {text[:120]}")
-                        current[text] = text
+                        current[normalize_key(text)] = text
 
                 next_value = page_num * 10
                 moved = go_to_page_by_index(target_frame, next_value)
@@ -152,7 +166,7 @@ def run():
     if is_first:
         save_data(current)
         if current:
-            items = list(current.keys())
+            items = list(current.values())
             batch_size = 5
             for i in range(0, len(items), batch_size):
                 chunk = items[i:i + batch_size]
@@ -164,10 +178,10 @@ def run():
         else:
             print("該当案件は0件でした。")
     else:
-        new_items = [t for t in current.keys() if t not in saved]
+        new_items = {k: v for k, v in current.items() if k not in saved}
         if new_items:
             msg = f"【京都府(Efftis)】新着案件を検知 ({len(new_items)}件)\n\n"
-            for raw_text in new_items:
+            for raw_text in new_items.values():
                 msg += f"・{raw_text[:120]}\n\n"
             send_line(msg)
         save_data(current)
